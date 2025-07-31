@@ -269,6 +269,7 @@ shaka.extern.BufferedInfo;
  *   primary: boolean,
  *   roles: !Array<string>,
  *   audioRoles: Array<string>,
+ *   videoRoles: Array<string>,
  *   accessibilityPurpose: ?shaka.media.ManifestParser.AccessibilityPurpose,
  *   forced: boolean,
  *   videoId: ?number,
@@ -353,6 +354,10 @@ shaka.extern.BufferedInfo;
  *   The roles of the audio in the track, e.g. <code>'main'</code> or
  *   <code>'commentary'</code>. Will be null for text tracks or variant tracks
  *   without audio.
+ * @property {Array<string>} videoRoles
+ *   The roles of the video in the track, e.g. <code>'main'</code> or
+ *   <code>'sign'</code>. Will be null for text tracks or variant tracks
+ *   without video.
  * @property {?shaka.media.ManifestParser.AccessibilityPurpose
  *           } accessibilityPurpose
  *   The DASH accessibility descriptor, if one was provided for this track.
@@ -552,7 +557,8 @@ shaka.extern.TextTrack;
  *   colorGamut: ?string,
  *   videoLayout: ?string,
  *   mimeType: ?string,
- *   codecs: ?string
+ *   codecs: ?string,
+ *   roles: !Array<string>,
  * }}
  *
  * @description
@@ -582,6 +588,8 @@ shaka.extern.TextTrack;
  *   The video MIME type of the content provided in the manifest.
  * @property {?string} codecs
  *   The video codecs string provided in the manifest, if present.
+ * @property {!Array<string>} roles
+ *   The roles of the track, e.g. <code>'main'</code>, <code>'sign'</code>.
  * @exportDoc
  */
 shaka.extern.VideoTrack;
@@ -2747,7 +2755,8 @@ shaka.extern.TextDisplayerConfiguration;
  *   preferredAudioLanguage: string,
  *   preferredAudioLabel: string,
  *   preferredTextLanguage: string,
- *   preferredVariantRole: string,
+ *   preferredAudioRole: string,
+ *   preferredVideoRole: string,
  *   preferredTextRole: string,
  *   preferredVideoCodecs: !Array<string>,
  *   preferredAudioCodecs: !Array<string>,
@@ -2826,8 +2835,12 @@ shaka.extern.TextDisplayerConfiguration;
  *   Changing this during playback will not affect the current playback.
  *   <br>
  *   Defaults to <code>''</code>.
- * @property {string} preferredVariantRole
- *   The preferred role to use for variants.
+ * @property {string} preferredAudioRole
+ *   The preferred audio role to use for variants.
+ *   <br>
+ *   Defaults to <code>''</code>.
+ * @property {string} preferredVideoRole
+ *   The preferred video role to use for variants.
  *   <br>
  *   Defaults to <code>''</code>.
  * @property {string} preferredTextRole
