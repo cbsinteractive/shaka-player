@@ -146,6 +146,7 @@
 +../../third_party/cml-cmcd/cmcd_encode_options.js
 +../../third_party/cml-cmcd/cmcd_event.js
 +../../third_party/cml-cmcd/cmcd_event_keys.js
++../../third_party/cml-cmcd/cmcd_event_report_config.js
 +../../third_party/cml-cmcd/cmcd_event_type.js
 +../../third_party/cml-cmcd/cmcd_formatter.js
 +../../third_party/cml-cmcd/cmcd_formatter_map.js
@@ -165,10 +166,14 @@
 +../../third_party/cml-cmcd/cmcd_object_type_list.js
 +../../third_party/cml-cmcd/cmcd_param.js
 +../../third_party/cml-cmcd/cmcd_player_state.js
++../../third_party/cml-cmcd/cmcd_report_config.js
++../../third_party/cml-cmcd/cmcd_reporter_config.js
 +../../third_party/cml-cmcd/cmcd_reporting_mode.js
 +../../third_party/cml-cmcd/cmcd_request.js
 +../../third_party/cml-cmcd/cmcd_request_key.js
 +../../third_party/cml-cmcd/cmcd_request_keys.js
++../../third_party/cml-cmcd/cmcd_request_report.js
++../../third_party/cml-cmcd/cmcd_request_report_config.js
 +../../third_party/cml-cmcd/cmcd_response.js
 +../../third_party/cml-cmcd/cmcd_response_keys.js
 +../../third_party/cml-cmcd/cmcd_stream_type.js
