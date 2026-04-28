@@ -147,6 +147,7 @@
 +../../third_party/cml-cmcd/cmcd_event_type.js
 +../../third_party/cml-cmcd/cmcd_formatter.js
 +../../third_party/cml-cmcd/cmcd_formatter_map.js
++../../third_party/cml-cmcd/cmcd_formatter_map_const.js
 +../../third_party/cml-cmcd/cmcd_formatter_options.js
 +../../third_party/cml-cmcd/cmcd_header_field.js
 +../../third_party/cml-cmcd/cmcd_header_key.js
