@@ -25,8 +25,8 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
 | **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ✅ Complete | 2 commits, ending at `adfdfab05`. Net −168 LoC across `lib/util/cmcd_manager.js` and `test/util/cmcd_manager_unit.js`. `python3 build/check.py` exits 0. `build/test.py` deferred to sub-phase E (Tasks 1.11-1.12 catalog and update wire-format-divergence assertions). |
 | **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ✅ Complete | 2 commits ending at `b94f7ebca`. Started at 52 of 124 CMCD tests failing post-1.10; ended at 0 fail / 124 pass. Three (c)-class adapter bugs fixed in `27cd16907`; ~80 (a)/(b)-class assertion updates in `b94f7ebca`. Full `--quick` suite: 2995/2995 pass. |
 | **Phase 1F** — Demo verification (Task 1.13) | ✅ Complete | Smoke-test on `bbb-dark-truths/dash.mpd` via Claude Preview-driven `python3 -m http.server`. Query mode (15 segment requests captured): `?CMCD=…cid="smoke-test",ot=m,sf=d,sid="…",sn=N,su,v=2` — `v=2` always present, `ts` absent in request mode, `sf=d` (no `'ld'`), `ot`/`sf`/`st` as tokens. Header mode (15 requests captured via request filter; CMCD-* stripped before fetch to avoid CORS preflight): `v=2` only in `CMCD-Session` shard (not in `CMCD-Object`/`Request`/`Status`); request shard contains `sn`/`mtp`/`su` only — no `ts`. Zero JS console errors. Per-phase PR (Task 1.14) deferred to single all-phases PR per user direction. |
-| **Phase 2** — Adopt CML constants, dedupe shaka duplicates | ⏳ Not started | After Phase 1 merges. |
-| **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ Not started | After Phase 2 merges. |
+| **Phase 2** — Adopt CML constants, dedupe shaka duplicates (Tasks 2.1-2.5) | ✅ Complete | 1 commit at `67443aacb`. Net −74 LoC in `lib/util/cmcd_manager.js` (+12 LoC value-identity test in `test/util/cmcd_manager_unit.js`). 7 internal shaka enums deleted; `StreamingFormat` retained as `@export`ed literal (Closure tooling rejects alias form). `build/check.py` 0; CMCD tests 125/125; `--quick` suite 2996/2996; smoke test confirmed wire format unchanged. Task 2.6 (open Phase 2 PR) dropped per single-PR strategy. |
+| **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ **Resume here.** | After Phase 2's dedupe lands, Phase 3 rewrites `cmcd_manager.js` as a thin adapter around `cml.cmcd.CmcdReporter`. |
 
 **Vendored port summary:** [`third_party/cml-cmcd/`](../../third_party/cml-cmcd/) holds 68 JS files (typedefs + enums + constants + encoders + helpers + shims + `CmcdReporter`) + `LICENSE` + `NOTICE` + `SUMMARY.txt`. At HEAD (`adfdfab05`), `python3 build/check.py` exits 0. `python3 build/build.py` was last clean at `d682bb1bb` and is not expected to break under sub-phase D's source-only changes; not re-run this session.
 
@@ -89,6 +89,30 @@ CMCD-Session: cid="smoke-test-headers",sf=d,sid="…",v=2
 
 **Sub-phase F caveat**: cross-origin storage.googleapis.com blocks CMCD-* request headers via CORS preflight. This is browser-spec behavior, not a shaka bug — typical CMCD deployments target the user's own CDN where preflight is configured to allow `Access-Control-Allow-Headers: CMCD-*`. The smoke test stripped CMCD-* in the request filter so the underlying segment fetch could complete; the encoder produced correct headers either way (verified at the filter checkpoint).
 
+### Phase 2 landing notes (Tasks 2.1-2.5)
+
+Pure dedupe — no behavioral change beyond what Phase 1 already shipped. Single commit at `67443aacb`. Net −74 LoC in `lib/util/cmcd_manager.js`; +12 LoC for the value-identity test. The full diff against pre-Phase-2 (`d663f6c12`) is what gets surfaced in the eventual all-phases PR description as "Phase 2".
+
+**7 internal shaka enums deleted** (none were `@export`ed, so deletion is internal-only):
+
+| Shaka (deleted) | Replacement | Notes |
+|---|---|---|
+| `ObjectType` | `cml.cmcd.CmcdObjectType` | 1:1 value match (9 entries) |
+| `Version` | `cml.cmcd.CMCD_V1` / `CMCD_V2` literals | Was a 2-entry enum wrapping `1` / `2` |
+| `StreamType` | `cml.cmcd.CmcdStreamType` | CML adds `LOW_LATENCY: 'll'`; harmless superset |
+| `CmcdMode` | `cml.cmcd.CmcdReportingMode` | Dropped unused `RESPONSE` value |
+| `CmcdKeys` | various | `V1Keys` → `CMCD_V1_KEYS`; `V2Common ∪ V2Request` → `CMCD_REQUEST_KEYS`; `V2Common ∪ V2Event` → `CMCD_REQUEST_KEYS ∪ CMCD_RESPONSE_KEYS ∪ CMCD_EVENT_KEYS`; `CmcdV2Events` → `Object.values(CmcdEventType)`; `CmcdV2PlayStates` → `Object.values(CmcdPlayerState)` |
+| `CmcdV2Constants` | inlined | `TIME_INTERVAL_DEFAULT_VALUE = 10` inlined as a magic number with a comment. CML uses `30`; Phase 3's `CmcdReporter` will adopt the CML default. |
+| `CmcdV2Keys` | inlined / aliased | `TIMESTAMP` inlined as `'ts'`; `TIME_INTERVAL_EVENT` → `cml.cmcd.CMCD_EVENT_TIME_INTERVAL` |
+
+**`StreamingFormat` retained as a literal `@enum`** (not aliased to CML). Closure's `clutz` TypeScript-defs generator and shaka's `generateExterns.js` both reject `@export`ed `@enum`s whose RHS is anything other than an inline `ObjectExpression` with literal values. Workaround patterns (alias, per-key copy with MemberExpression values, `@const` instead of `@enum`) all hit the same wall. The 4 values match `cml.cmcd.CmcdStreamingFormat` exactly; the new `StreamingFormat alias / preserves value-identity with cml.cmcd.CmcdStreamingFormat` test in `test/util/cmcd_manager_unit.js` asserts this so Phase 3 can rely on it.
+
+**Permissive behavior changes from CML key-set adoption:**
+- V2 request mode now accepts `br`, `bsa`, `bsd`, `bsda`, `cs`, `dfa`, `nr`, `pb`, `sn` in `includeKeys` (previously rejected by shaka's narrower `V2RequestModeKeys`). All are CMCD V2 spec keys; shaka's omission was non-spec.
+- V2 request mode now rejects `ts` in `includeKeys` (was accepted previously). `ts` is event-only per CTA-5004-B; the encoder filtered it out anyway since Phase 1 sub-phase E B2 — this aligns the upstream `includeKeys` validator with the encoder filter.
+- Event-mode validation accepts a strict superset of what shaka's old `V2EventModeKeys` allowed.
+- `isValidEvent_` accepts CML's 17 event types instead of shaka's 10 (adds the 7 ad / skip / custom-event types). shaka doesn't emit these, so user-facing impact is nil.
+
 ### Key architectural decisions in the port — surface in Phase 1 PR description
 
 These were judgment calls during sub-phases B+C; maintainers should weigh in before merge:
@@ -103,11 +127,12 @@ Two git stashes exist:
 - `stash@{0}: On feat/cmcd-cml-refactor: accidental-stash-pop-recovery` — created during a sub-phase B subagent's `git stash pop` mishap. Contains contaminated working state from that incident.
 - `stash@{1}: On task/revert-cmcd-v1: CMCD STUFF` — pre-existing user stash. Preserved.
 
-### Resuming work in a new session — Phase 2 prep
+### Resuming work in a new session — Phase 3 prep
 
-- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as sub-phase D/E/F prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
-- **Phase 2 scope (Tasks 2.1-2.6):** map shaka's `ObjectType`, `Version`, `StreamType`, `StreamingFormat`, `CmcdMode`, `Player.State` enums to CML equivalents; replace internal references; re-export `StreamingFormat` as a shaka alias of `cml.cmcd.CmcdStreamingFormat` for back-compat; delete the duplicate definitions. **Phase 2 is pure dedupe** — no behavioral change beyond what Phase 1 already shipped. Test suite should stay at 0 fail throughout.
-- **Phase 1 PR description scaffolding** lives at `plans/cmcd-cml-refactor/phase-1-pr-draft.md` (uncommitted scratch file). Phase 2 + 3 will accrete to the same file or be merged into one before the eventual all-phases PR.
+- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as Phase 1/2 prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
+- **Phase 3 scope (Tasks 3.1-3.16):** rewrite `lib/util/cmcd_manager.js` as a thin (~250-line) adapter around `cml.cmcd.CmcdReporter`. Delete the state machine, sequence-number bookkeeping, event timing, and most key-filtering logic — all of those move into `CmcdReporter`. Apply experimental v2 config renames (per spec). Delete the CMCD wire-format unit tests (~3500 lines of `cmcd_manager_unit.js`) and replace with adapter-glue + smoke tests.
+- **Phase 3 is the high-risk PR.** Watch for: state-transition timing differences (CML vs. shaka's existing transitions), per-target sequence-number behavior (Task 0.7), event-mode dispatch shape, `applyResponseData` mutation contract (Task 3.5).
+- **Phase 1 PR description scaffolding** lives at `plans/cmcd-cml-refactor/phase-1-pr-draft.md` (uncommitted scratch file). Phase 2 / 3 will accrete to the same file or be merged into one before the eventual all-phases PR.
 
 ---
 

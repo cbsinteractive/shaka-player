@@ -1,22 +1,28 @@
 <!--
-Phase 1 PR draft. Temporary file (not committed). Move title to PR title
-and body to PR body when opening. Per Task 1.12 step 5 / Task 1.14 of
-plans/cmcd-cml-refactor/plan.md.
+Cumulative PR draft for the CMCD CML refactor. Phase 1 + Phase 2 are
+landed on feat/cmcd-cml-refactor; Phase 3 will append before the eventual
+single all-phases PR.
 -->
 
 # Title
 
 ```
-refactor(cmcd): vendor @svta/cml-cmcd, delegate encoding to CML (1/3)
+refactor(cmcd): vendor @svta/cml-cmcd, replace custom encoder + state machine
 ```
 
 # Body
 
 ## Summary
 
-Phase 1 of 3 in the CMCD CML refactor. Replaces shaka's custom CMCD wire-format encoding with a vendored Closure port of [`@svta/cml-cmcd`](https://github.com/streaming-video-technology-alliance/common-media-library) (CML) under `third_party/cml-cmcd/`. Phases 2 and 3 will adopt CML's constants/enums (Phase 2) and rewrite `cmcd_manager.js` as a thin adapter around `CmcdReporter` (Phase 3) — see [`plans/cmcd-cml-refactor/spec.md`](plans/cmcd-cml-refactor/spec.md) and [`plans/cmcd-cml-refactor/plan.md`](plans/cmcd-cml-refactor/plan.md).
+Replaces shaka's custom CMCD wire-format encoding and state machine with a vendored Closure port of [`@svta/cml-cmcd`](https://github.com/streaming-video-technology-alliance/common-media-library) (CML) under `third_party/cml-cmcd/`. Implementation in three sequential phases off `feat/cmcd-cml-refactor`:
 
-This PR is **behavior-preserving** for shaka's public API, modulo three documented intentional wire-format changes that align shaka with CTA-5004 / CTA-5004-B and CML's spec-conformant output.
+- **Phase 1** (Tasks 1.1-1.13) vendors the port and routes shaka's encoders through it. Three intentional wire-format changes (`nor` URL relativization, `'ld'`/`'lh'` dropped, V2 SFV-conformant encoding).
+- **Phase 2** (Tasks 2.1-2.5) dedupes shaka's internal enums and key arrays in favor of `cml.cmcd.*` equivalents. Pure dedupe; no behavior change.
+- **Phase 3** *(in progress)* rewrites `lib/util/cmcd_manager.js` as a thin adapter around `cml.cmcd.CmcdReporter`, deletes the state machine, ships experimental v2 config renames.
+
+See [`plans/cmcd-cml-refactor/spec.md`](plans/cmcd-cml-refactor/spec.md) and [`plans/cmcd-cml-refactor/plan.md`](plans/cmcd-cml-refactor/plan.md) for full design + rationale.
+
+Phases 1 + 2 are **behavior-preserving** for shaka's public API, modulo three documented intentional wire-format changes that align shaka with CTA-5004 / CTA-5004-B and CML's spec-conformant output.
 
 ## What's vendored
 
@@ -85,25 +91,49 @@ The state machine, sequence numbers (`cmcdSequenceNumbers_` per-target counters)
 
 A new private `getEncodeOptions_(uri, version, reportingMode)` static helper builds `cml.cmcd.CmcdEncodeOptions` objects at the four CMCD-encoding call sites: `appendSrcData`, `appendTextTrackData`, `sendCmcdRequest_` (event/response path), `applyCmcdDataToRequest_` (request path). It threads `this.config_.version` and the reporting mode (`CMCD_REQUEST_MODE` for request paths, `CMCD_EVENT_MODE` for `sendCmcdRequest_`).
 
-## Diff size
+## Phase 2 implementation summary
 
-- `third_party/cml-cmcd/`: 74 new JS files + LICENSE/NOTICE/SUMMARY (+5017 lines).
-- `lib/util/cmcd_manager.js`: +100 / −138 lines (net −38).
-- `test/util/cmcd_manager_unit.js`: +107 / −140 lines (net −33; mostly assertion updates and the deleted `urlToRelativePath` describe block).
+Pure dedupe — no behavioral change beyond what Phase 1 shipped. Single commit `67443aacb`.
+
+**7 internal shaka enums deleted** (none were `@export`ed, so deletion is internal-only):
+
+| Shaka (deleted) | Replacement | Notes |
+|---|---|---|
+| `ObjectType` | `cml.cmcd.CmcdObjectType` | 1:1 value match (9 entries) |
+| `Version` | `cml.cmcd.CMCD_V1` / `CMCD_V2` literals | Was a 2-entry enum wrapping `1` / `2` |
+| `StreamType` | `cml.cmcd.CmcdStreamType` | CML adds `LOW_LATENCY: 'll'`; harmless superset |
+| `CmcdMode` | `cml.cmcd.CmcdReportingMode` | Dropped unused `RESPONSE` value |
+| `CmcdKeys` | various CML key arrays | `V1Keys` → `CMCD_V1_KEYS`; `V2Common ∪ V2Request` → `CMCD_REQUEST_KEYS`; `V2Common ∪ V2Event` → `CMCD_REQUEST_KEYS ∪ CMCD_RESPONSE_KEYS ∪ CMCD_EVENT_KEYS`; `CmcdV2Events` → `Object.values(CmcdEventType)`; `CmcdV2PlayStates` → `Object.values(CmcdPlayerState)` |
+| `CmcdV2Constants` | inlined | `TIME_INTERVAL_DEFAULT_VALUE = 10` inlined as a magic number with a comment. CML uses `30`; Phase 3's `CmcdReporter` will adopt the CML default. |
+| `CmcdV2Keys` | inlined / aliased | `TIMESTAMP` inlined as the literal `'ts'`; `TIME_INTERVAL_EVENT` → `cml.cmcd.CMCD_EVENT_TIME_INTERVAL` |
+
+**`StreamingFormat` retained as a literal `@enum`** (not aliased to CML). Closure's `clutz` TypeScript-defs generator and shaka's `generateExterns.js` both reject `@export`ed `@enum`s whose RHS is anything other than an inline `ObjectExpression` with literal values. Workaround patterns (alias, per-key copy with `MemberExpression` values, `@const` instead of `@enum`) all hit the same wall. The 4 values match `cml.cmcd.CmcdStreamingFormat` exactly; a new `preserves value-identity with cml.cmcd.CmcdStreamingFormat` unit test asserts this so Phase 3 can rely on it. Internal type annotations (`sf_` private field, `getStreamFormat_` return type) refer to `cml.cmcd.CmcdStreamingFormat` directly; the `@export`ed `shaka.util.CmcdManager.StreamingFormat` is the public-facing form.
+
+**Permissive behavior changes from CML key-set adoption:**
+- V2 request mode now accepts `br`, `bsa`, `bsd`, `bsda`, `cs`, `dfa`, `nr`, `pb`, `sn` in `includeKeys` (previously rejected by shaka's narrower `V2RequestModeKeys`). All are CMCD V2 spec keys; shaka's omission was non-spec.
+- V2 request mode now rejects `ts` in `includeKeys` (was accepted previously). `ts` is event-only per CTA-5004-B; the encoder filtered it out anyway since Phase 1 sub-phase E B2 — this aligns the upstream `includeKeys` validator with the encoder filter.
+- Event-mode validation accepts a strict superset of what shaka's old `V2EventModeKeys` allowed.
+- `isValidEvent_` accepts CML's 17 event types instead of shaka's 10 (adds the 7 ad / skip / custom-event types). shaka doesn't emit these, so user-facing impact is nil.
+
+## Diff size (Phases 1 + 2; Phase 3 will append)
+
+- `third_party/cml-cmcd/`: 74 new JS files + LICENSE/NOTICE/SUMMARY (+5017 lines, Phase 1).
+- `lib/util/cmcd_manager.js`: +100 / −138 (Phase 1) and +13 / −87 (Phase 2). Cumulative net −112 / +113.
+- `test/util/cmcd_manager_unit.js`: +107 / −140 (Phase 1) and +12 / 0 (Phase 2 value-identity test). Cumulative net −33 / +119.
 - `build/conformance.textproto`: 2 entries added (`setInterval`, `fetch`).
 - `build/types/core`: 74 entries added for the vendored files.
 - `plans/cmcd-cml-refactor/`: design + verification docs.
 
-**Total**: 84 files, +5797 / −327.
+**Total (Phases 1 + 2)**: ~85 files, ~+5800 / ~−500.
 
 (Plan estimated ~3000 lines for the port; actual is ~5000 because of (a) `cml_sfv.js` (~448 LoC RFC 8941 serializer shim — CML uses `@svta/cml-utils`'s SFV encoder, which we vendor inline since the shim doesn't ship as a separate package), (b) 8 spec-excluded files re-included as runtime dependencies, and (c) generous license/notice headers per Apache 2.0.)
 
-## Verification
+## Verification (Phases 1 + 2)
 
 - [x] `python3 build/check.py` exits 0 (lint, conformance, types, spelling).
 - [x] `python3 build/all.py` exits 0 (full bundle build: dash/hls/compiled/ui/experimental, debug + release).
-- [x] `python3 build/test.py --filter Cmcd` — 124 / 124 pass.
-- [x] `python3 build/test.py --quick` — 2995 / 2995 pass (no regressions outside CMCD).
+- [x] `python3 build/test.py --filter Cmcd` — 125 / 125 pass (Phase 2 added a value-identity test).
+- [x] `python3 build/test.py --quick` — 2996 / 2996 pass (no regressions outside CMCD).
 - [x] Demo smoke test on `bbb-dark-truths/dash.mpd` — query mode emits `?CMCD=cid="…",ot=m,sf=d,sid="…",sn=N,su,v=2` (no `ts`, no `sf=ld`, tokens unquoted, `v=2` always present); header mode emits `v=2` only in `CMCD-Session` shard (the C2 sub-phase E fix verified end-to-end). Zero JS console errors. See [`plan.md`](plans/cmcd-cml-refactor/plan.md) "Sub-phase F landing notes" for the full capture.
 
 ## Plan / spec docs
@@ -116,13 +146,18 @@ This PR includes the design + verification docs under `plans/cmcd-cml-refactor/`
 
 These remain in the repo as Phase 2 + 3 reference. They can be deleted once Phase 3 merges if maintainers prefer.
 
-## Phase 1 commit list (for reviewer convenience)
+## Commit list (for reviewer convenience)
 
+**Phase 0 — CML verification (5 commits, docs-only):**
 ```
 79702531e docs(cmcd): add Phase 0 CML version pin + API verification report
 33c7c78ab docs(cmcd): fix doc cross-references in Phase 0 verification report
 be97afe47 docs(cmcd): restructure Phase 0 doc-update checklist into plan vs spec lists
 6a851a2d8 docs(cmcd): apply Phase 0 verification findings to spec and plan
+```
+
+**Phase 1 — Vendor port + encoder delegation (~20 commits):**
+```
 a8d855179 chore(third_party): add cml-cmcd vendoring skeleton
 0027abbe1 chore(cmcd): port cml-cmcd type definitions as closure typedefs
 ae92000c7 chore(cmcd): port cml-cmcd enums to closure
@@ -144,6 +179,12 @@ adfdfab05 fix(cmcd): drop non-spec 'ld'/'lh' StreamingFormat values
 27cd16907 fix(cmcd): thread version/reportingMode + prepare-once for header shards
 b94f7ebca test(cmcd): update assertions for CML wire-format alignments
 0e3883181 docs(cmcd): mark Phase 1 sub-phase E complete in plan
+d663f6c12 docs(cmcd): mark Phase 1 sub-phase F complete; add all-phases PR draft
 ```
 
-The first 5 commits (`79702531e`–`6a851a2d8`) are Phase 0 docs only and could be split off as a docs-only PR if maintainers prefer. The rest are Phase 1 proper.
+**Phase 2 — Adopt CML constants/enums (1 commit):**
+```
+67443aacb refactor(cmcd): adopt CML constants/enums; delete shaka duplicates
+```
+
+The first 4 commits (`79702531e`–`6a851a2d8`) are Phase 0 docs only and could be split off as a docs-only PR if maintainers prefer. The rest are implementation.
