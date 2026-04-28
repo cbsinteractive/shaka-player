@@ -196,11 +196,13 @@
 +../../third_party/cml-cmcd/is_token_field.js
 +../../third_party/cml-cmcd/is_valid.js
 +../../third_party/cml-cmcd/prepare_cmcd_data.js
++../../third_party/cml-cmcd/resolve_version.js
 +../../third_party/cml-cmcd/to_cmcd_headers.js
 +../../third_party/cml-cmcd/to_cmcd_query.js
 +../../third_party/cml-cmcd/to_cmcd_url.js
 +../../third_party/cml-cmcd/to_cmcd_value.js
 +../../third_party/cml-cmcd/to_prepared_cmcd_headers.js
++../../third_party/cml-cmcd/up_convert_to_v2.js
 
 +../../third_party/language-mapping-list/language-mapping-list.js
 

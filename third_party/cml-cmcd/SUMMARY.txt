@@ -17,9 +17,23 @@ cml-cmcd
     - TypeScript source converted to Closure-annotated JS by hand
     - Type-only imports erased; replaced with local closure typedefs
     - Decoders (decodeCmcd, fromCmcd*) omitted: shaka emits CMCD only
-    - Validators (validateCmcd*, isCmcd*) omitted: tooling-only utilities
-    - cml-utils dep removed: shaka adapter always sets `sid` explicitly;
-      a 5-line cml_utils.js shim provides `uuid` for any dead default paths
+    - Validators (validateCmcd*) omitted: tooling-only utilities
+    - Predicates (`is_cmcd_*_key.js`, `is_token_field.js`,
+      `is_valid.js`) included: required at runtime by `prepareCmcdData`
+      even though spec § "Excluded > Predicates" had marked them
+      tooling-only. `groupCmcdHeaders` likewise included as it is the
+      shared encoder/decoder helper used by `toPreparedCmcdHeaders`.
+    - cml-utils dep absorbed into `cml_utils.js` shim:
+        * `uuid` (wraps `crypto.randomUUID()`; dead-codepath for shaka)
+        * `urlToRelativePath` (used by `CMCD_FORMATTER_MAP`'s `nor`)
+    - structured-field-values dep absorbed into `cml_sfv.js` shim:
+        * `SfItem` / `SfToken` runtime classes
+        * `encodeSfDict` (RFC 8941 §4.1 dictionary serializer; pulls in
+          its transitive serializer closure verbatim because every
+          CMCD wire byte routes through it)
+      Decoding (`decodeSfDict`, `decodeSfItem`) is not vendored — only
+      encoder surface is needed.
     - Filenames disambiguated with `_const` suffix where TS files differ
       only in case (e.g., `CmcdV1.ts` typedef + `CMCD_V1.ts` numeric const
-      → `cmcd_v1.js` + `cmcd_v1_const.js`). Affects v1, v2, and HEADER_MAP.
+      → `cmcd_v1.js` + `cmcd_v1_const.js`). Affects v1, v2, HEADER_MAP,
+      and FORMATTER_MAP.
