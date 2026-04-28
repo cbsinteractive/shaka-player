@@ -234,7 +234,9 @@ describe('CmcdManager Setup', () => {
         const query = CmcdManager.toQuery({
           'com.test-escape': 'Double "Quotes"',
         });
-        const result = 'com.test-escape="Double \\"Quotes\\""';
+        // CML's encoder treats absent `v` as V2 default and emits `v=2`
+        // alongside the data; old shaka encoder did not auto-add `v`.
+        const result = 'com.test-escape="Double \\"Quotes\\"",v=2';
         expect(query).toBe(result);
       });
     });
@@ -254,8 +256,11 @@ describe('CmcdManager Setup', () => {
       });
 
       it('ignores empty shards', () => {
+        // CML auto-adds `v=2` for V2 (the default version when no `v`
+        // is provided), so the Session shard is never truly empty.
         expect(CmcdManager.toHeaders({br: 200})).toEqual({
           'CMCD-Object': 'br=200',
+          'CMCD-Session': 'v=2',
         });
       });
     });
@@ -1311,7 +1316,11 @@ describe('CmcdManager Setup', () => {
 
         expect(decodedUri).toContain('sid=');
         expect(decodedUri).toContain('msd=');
-        expect(decodedUri).not.toContain('v=2');
+        // CML's prepareCmcdData unconditionally appends `v` for V2 even
+        // when the user's includeKeys filter omits it (CTA-5004-B § 4.1
+        // mandates `v` in V2 output). Old shaka encoder honored the
+        // includeKeys exclusion; spec-aligned behavior wins.
+        expect(decodedUri).toContain('v=2');
       });
 
       it('filters keys in request mode based on includeKeys', () => {
@@ -1335,7 +1344,10 @@ describe('CmcdManager Setup', () => {
         const decodedUri = decodeURIComponent(request.uris[0]);
         expect(decodedUri).toContain('sid=');
         expect(decodedUri).toContain('msd=');
-        expect(decodedUri).not.toContain('v=2');
+        // CML auto-adds `v=2` regardless of includeKeys (see "filters
+        // keys in response based on includeKeys" above for full
+        // rationale).
+        expect(decodedUri).toContain('v=2');
       });
     });
 
@@ -2044,7 +2056,11 @@ describe('CmcdManager Setup', () => {
         const request = requestSpy.calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('nor="next-seg.m4v"');
+        // V2 `nor` is an inner-list `nor=("...")` (CTA-5004-B § 4.1).
+        // Event-mode reports go to a collector at a different origin
+        // from the segment URL, so CML preserves the absolute URL
+        // rather than relativizing.
+        expect(decodedUri).toContain('nor=("https://test.com/next-seg.m4v")');
         expect(decodedUri).not.toContain('nrr=');
       });
 
@@ -2568,13 +2584,19 @@ describe('CmcdManager Setup', () => {
         expect(decodedUri).not.toContain('ltc=');
       });
 
-      it('includes ts for segment requests', () => {
+      it('does not include ts for segment requests', () => {
+        // Per CTA-5004-B § 4.1, `ts` is an event-only key. Old shaka
+        // emitted it in request-mode CMCD too; CML's request-mode
+        // filter (`isCmcdRequestKey`) correctly excludes it. The
+        // following `includes ts for segment responses` test confirms
+        // `ts` still appears for event-mode (response-received)
+        // reports, which is where it belongs.
         const cmcdManager = createCmcdManager(mockPlayer, {version: 2});
         const request = createRequest();
         const context = createSegmentContext();
         cmcdManager.applyRequestSegmentData(request, context);
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('ts=');
+        expect(decodedUri).not.toContain('ts=');
       });
 
       it('includes ts for segment responses', () => {
@@ -3050,31 +3072,31 @@ describe('CmcdManager Setup', () => {
         let request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).toContain('v=2');
 
         mockVideo.dispatchEvent(new shaka.util.FakeEvent('playing'));
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
         expect(decodedUri).toContain('v=2');
 
         mockVideo.dispatchEvent(new shaka.util.FakeEvent('pause'));
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="a"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=a');
 
         mockVideo.dispatchEvent(new shaka.util.FakeEvent('seeking'));
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="k"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=k');
       });
 
       it('sends mute and unmute events', () => {
@@ -3104,7 +3126,7 @@ describe('CmcdManager Setup', () => {
         let request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="m"');
+        expect(decodedUri).toContain('e=m');
         expect(decodedUri).toContain('v=2');
 
         // Unmute
@@ -3116,7 +3138,7 @@ describe('CmcdManager Setup', () => {
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="um"');
+        expect(decodedUri).toContain('e=um');
       });
 
       describe('Time interval events', () => {
@@ -3149,7 +3171,7 @@ describe('CmcdManager Setup', () => {
           const request = /** @type {!jasmine.Spy} */ (requestSpy)
               .calls.mostRecent().args[1];
           const decodedUri = decodeURIComponent(request.uris[0]);
-          expect(decodedUri).toContain('e="t"');
+          expect(decodedUri).toContain('e=t');
           expect(decodedUri).toContain('v=2');
         });
 
@@ -3210,7 +3232,7 @@ describe('CmcdManager Setup', () => {
           const request = /** @type {!jasmine.Spy} */ (requestSpy)
               .calls.mostRecent().args[1];
           const decodedUri = decodeURIComponent(request.uris[0]);
-          expect(decodedUri).toContain('e="t"');
+          expect(decodedUri).toContain('e=t');
           expect(decodedUri).toContain('v=2');
         });
       });
@@ -3303,11 +3325,11 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
 
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="m"');
-        expect(decodedUri).not.toContain('e="ps"');
-        expect(decodedUri).not.toContain('sta="p"');
-        expect(decodedUri).not.toContain('sta="a"');
-        expect(decodedUri).not.toContain('sta="k"');
+        expect(decodedUri).toContain('e=m');
+        expect(decodedUri).not.toContain('e=ps');
+        expect(decodedUri).not.toContain('sta=p');
+        expect(decodedUri).not.toContain('sta=a');
+        expect(decodedUri).not.toContain('sta=k');
 
         // Should not have been called again for 'seeking'
         expect(requestSpy).toHaveBeenCalledTimes(1);
@@ -3337,8 +3359,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).toContain('mtp=');
         expect(decodedUri).toContain('cid="v2-event-content"');
 
@@ -3349,8 +3371,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
         expect(decodedUri).toContain('mtp=');
         expect(decodedUri).toContain('cid="v2-event-content"');
       });
@@ -3417,8 +3439,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).not.toContain('d=');
         expect(decodedUri).not.toContain('rtp=');
 
@@ -3429,8 +3451,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
         expect(decodedUri).not.toContain('d=');
         expect(decodedUri).not.toContain('rtp=');
       });
@@ -3473,13 +3495,15 @@ describe('CmcdManager Setup', () => {
 
         // Assertions for the 'play' event
         const decodedUri1 = decodeURIComponent(playCall1.uris[0]);
-        expect(decodedUri1).toContain('e="ps"');
-        expect(decodedUri1).toContain('sta="s"');
-        expect(decodedUri1).not.toContain('v=2');
+        expect(decodedUri1).toContain('e=ps');
+        expect(decodedUri1).toContain('sta=s');
+        // cmcd1's includeKeys excludes 'v', but CML's prepareCmcdData
+        // unconditionally appends `v` for V2 (CTA-5004-B § 4.1).
+        expect(decodedUri1).toContain('v=2');
 
         const decodedUri2 = decodeURIComponent(playCall2.uris[0]);
-        expect(decodedUri2).toContain('e="ps"');
-        expect(decodedUri2).toContain('sta="s"');
+        expect(decodedUri2).toContain('e=ps');
+        expect(decodedUri2).toContain('sta=s');
         expect(decodedUri2).toContain('v=2');
 
         // Reset the spy before the next event to have clean calls
@@ -3498,13 +3522,15 @@ describe('CmcdManager Setup', () => {
 
         // Assertions for the 'playing' event
         const decodedUri3 = decodeURIComponent(playingCall1.uris[0]);
-        expect(decodedUri3).toContain('e="ps"');
-        expect(decodedUri3).toContain('sta="p"');
-        expect(decodedUri3).not.toContain('v=2');
+        expect(decodedUri3).toContain('e=ps');
+        expect(decodedUri3).toContain('sta=p');
+        // CML auto-adds `v=2` regardless of includeKeys (see 'play'
+        // assertion above for rationale).
+        expect(decodedUri3).toContain('v=2');
 
         const decodedUri4 = decodeURIComponent(playingCall2.uris[0]);
-        expect(decodedUri4).toContain('e="ps"');
-        expect(decodedUri4).toContain('sta="p"');
+        expect(decodedUri4).toContain('e=ps');
+        expect(decodedUri4).toContain('sta=p');
         expect(decodedUri4).toContain('v=2');
       });
 
@@ -3532,8 +3558,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
 
         expect(request.uris[0]).toBe('https://example.com/cmcd');
-        expect(request.headers['CMCD-Request']).toContain('e="ps"');
-        expect(request.headers['CMCD-Request']).toContain('sta="s"');
+        expect(request.headers['CMCD-Request']).toContain('e=ps');
+        expect(request.headers['CMCD-Request']).toContain('sta=s');
         expect(request.headers['CMCD-Request']).toContain('ts=');
 
         expect(request.headers['CMCD-Session']).toContain('v=2');
@@ -3544,8 +3570,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
 
         expect(request.uris[0]).toBe('https://example.com/cmcd');
-        expect(request.headers['CMCD-Request']).toContain('e="ps"');
-        expect(request.headers['CMCD-Request']).toContain('sta="p"');
+        expect(request.headers['CMCD-Request']).toContain('e=ps');
+        expect(request.headers['CMCD-Request']).toContain('sta=p');
         expect(request.headers['CMCD-Request']).toContain('ts=');
         expect(request.headers['CMCD-Session']).toContain('v=2');
         expect(request.headers['CMCD-Session']).toContain(`sid="${sessionId}"`);
@@ -3572,8 +3598,8 @@ describe('CmcdManager Setup', () => {
         const request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).toContain('ts=');
       });
 
@@ -3627,8 +3653,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
 
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).not.toContain('rc=');
         expect(decodedUri).not.toContain('url=');
         expect(decodedUri).not.toContain('ttfb=');
@@ -3686,8 +3712,8 @@ describe('CmcdManager Setup', () => {
         let decodedUri = decodeURIComponent(request.uris[0]);
 
         // Check for essential event keys
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
 
         mockVideo.dispatchEvent(new shaka.util.FakeEvent('playing'));
 
@@ -3697,8 +3723,8 @@ describe('CmcdManager Setup', () => {
         decodedUri = decodeURIComponent(request.uris[0]);
 
         // Check for essential event keys
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
 
         // Check for other common keys that should be included by default
         expect(decodedUri).toContain(`sid="${sessionId}"`);
@@ -3730,8 +3756,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
 
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
 
         mockMediaElement.dispatchEvent(new shaka.util.FakeEvent('playing'));
         expect(requestSpy).toHaveBeenCalledTimes(2);
@@ -3739,8 +3765,8 @@ describe('CmcdManager Setup', () => {
             .calls.mostRecent().args[1];
 
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
 
         mockMediaElement.muted = true;
         mockMediaElement.dispatchEvent(
@@ -3749,7 +3775,7 @@ describe('CmcdManager Setup', () => {
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="m"');
+        expect(decodedUri).toContain('e=m');
 
         mockMediaElement.muted = false;
         mockMediaElement.dispatchEvent(
@@ -3758,7 +3784,7 @@ describe('CmcdManager Setup', () => {
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="um"');
+        expect(decodedUri).toContain('e=um');
       });
 
       it('sends all keys for all events when both arrays are empty', () => {
@@ -3788,8 +3814,8 @@ describe('CmcdManager Setup', () => {
         let request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="s"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=s');
         expect(decodedUri).toContain(`sid="${sessionId}"`);
         expect(decodedUri).toContain(`cid="v2-event-content-all"`);
         expect(decodedUri).toContain('v=2');
@@ -3800,8 +3826,8 @@ describe('CmcdManager Setup', () => {
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="p"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=p');
         expect(decodedUri).toContain(`sid="${sessionId}"`);
         expect(decodedUri).toContain(`cid="v2-event-content-all"`);
         expect(decodedUri).toContain('v=2');
@@ -3814,7 +3840,7 @@ describe('CmcdManager Setup', () => {
         request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="m"');
+        expect(decodedUri).toContain('e=m');
         expect(decodedUri).toContain(`sid="${sessionId}"`);
         expect(decodedUri).toContain(`cid="v2-event-content-all"`);
         expect(decodedUri).toContain('v=2');
@@ -3850,8 +3876,8 @@ describe('CmcdManager Setup', () => {
         const request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="r"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=r');
         expect(decodedUri).toContain('v=2');
       });
 
@@ -3880,8 +3906,8 @@ describe('CmcdManager Setup', () => {
         const request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="d"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=d');
       });
 
       it('sends player expand and collapse events', () => {
@@ -3921,7 +3947,7 @@ describe('CmcdManager Setup', () => {
         let request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pe"');
+        expect(decodedUri).toContain('e=pe');
 
         // Mock fullscreenElement to simulate exiting fullscreen
         Object.defineProperty(document, 'fullscreenElement', {
@@ -3934,7 +3960,7 @@ describe('CmcdManager Setup', () => {
         request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pc"');
+        expect(decodedUri).toContain('e=pc');
 
         // Restore original property
         Object.defineProperty(document, 'fullscreenElement', {
@@ -3972,8 +3998,8 @@ describe('CmcdManager Setup', () => {
         const request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="e"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=e');
         expect(decodedUri).toContain('v=2');
       });
 
@@ -4006,8 +4032,8 @@ describe('CmcdManager Setup', () => {
         const request = /** @type {!jasmine.Spy} */ (requestSpy)
             .calls.mostRecent().args[1];
         const decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="ps"');
-        expect(decodedUri).toContain('sta="w"');
+        expect(decodedUri).toContain('e=ps');
+        expect(decodedUri).toContain('sta=w');
         expect(decodedUri).toContain('v=2');
       });
 
@@ -4038,7 +4064,7 @@ describe('CmcdManager Setup', () => {
         let request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pe"');
+        expect(decodedUri).toContain('e=pe');
 
         // Simulate leaving Picture-in-Picture
         mockVideo.dispatchEvent(new shaka.util.FakeEvent(
@@ -4048,7 +4074,7 @@ describe('CmcdManager Setup', () => {
         request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pc"');
+        expect(decodedUri).toContain('e=pc');
       });
 
       it('sends webkit presentation mode change events', () => {
@@ -4091,7 +4117,7 @@ describe('CmcdManager Setup', () => {
         let request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         let decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pe"');
+        expect(decodedUri).toContain('e=pe');
 
         // Simulate exiting fullscreen via webkit presentation mode
         mockVideo.webkitPresentationMode = 'inline';
@@ -4102,7 +4128,7 @@ describe('CmcdManager Setup', () => {
         request = (/** @type {!jasmine.Spy} */ (requestSpy))
             .calls.mostRecent().args[1];
         decodedUri = decodeURIComponent(request.uris[0]);
-        expect(decodedUri).toContain('e="pc"');
+        expect(decodedUri).toContain('e=pc');
       });
 
       it('sends separate reports with correct keys for multiple targets',
@@ -4167,14 +4193,14 @@ describe('CmcdManager Setup', () => {
 
             expect(firstRequest.uris[0]).toContain('target1.com');
             expect(firstDecodedUri).toContain('ts=');
-            expect(firstDecodedUri).toContain('e="rr"');
+            expect(firstDecodedUri).toContain('e=rr');
             expect(firstDecodedUri).toContain('rc');
             expect(firstDecodedUri).toContain('url');
             expect(firstDecodedUri).not.toContain('sta=');
 
             expect(secondRequest.uris[0]).toContain('target2.com');
-            expect(secondDecodedUri).toContain('e="ps"');
-            expect(secondDecodedUri).toContain('sta="s"');
+            expect(secondDecodedUri).toContain('e=ps');
+            expect(secondDecodedUri).toContain('sta=s');
             expect(secondDecodedUri).toContain('ts=');
             expect(secondDecodedUri).not.toContain('rc=');
             expect(secondDecodedUri).not.toContain('url=');
