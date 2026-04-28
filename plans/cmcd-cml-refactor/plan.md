@@ -12,7 +12,7 @@
 
 ---
 
-## Current status (last updated 2026-04-27)
+## Current status (last updated 2026-04-28)
 
 This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read this section first before resuming work in a new session.
 
@@ -22,13 +22,22 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
 | **Phase 1A** — Skeleton + typedefs + enums + constants + utils (Tasks 1.1-1.5) | ✅ Complete | 6 commits, ending at `e6cb2563d`. 44 files added under `third_party/cml-cmcd/`. |
 | **Phase 1B** — Encoders + helpers + cml-utils/sfv shims + deferred `CMCD_FORMATTER_MAP` (Tasks 1.6-1.7) | ✅ Complete | 5 commits, ending at `9bcf6614e`. 23 new files. Re-included 8 spec-excluded files (predicates + `is_valid.js` + `group_cmcd_headers.js`) that were genuinely runtime-required by encoders. New shim `cml_sfv.js` (~448 LoC, RFC 8941 §4.1 serializer). |
 | **Phase 1C** — `CmcdReporter` + 5 deferred typedefs (Task 1.8) | ✅ Complete | 3 commits, ending at `d682bb1bb`. 6 new files. The vendored port is now structurally complete. |
-| **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ⏳ Not started | **First real shaka source change. Resume here.** |
-| **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ⏳ Not started | Needs human judgment on divergence classification. |
+| **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ✅ Complete | 2 commits, ending at `adfdfab05`. Net −168 LoC across `lib/util/cmcd_manager.js` and `test/util/cmcd_manager_unit.js`. `python3 build/check.py` exits 0. `build/test.py` deferred to sub-phase E (Tasks 1.11-1.12 catalog and update wire-format-divergence assertions). |
+| **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ⏳ **Resume here.** | Needs human judgment on divergence classification. |
 | **Phase 1F** — Demo verification + Phase 1 PR (Tasks 1.13-1.14) | ⏳ Not started | Phase 1 ships as PR after this. |
 | **Phase 2** — Adopt CML constants, dedupe shaka duplicates | ⏳ Not started | After Phase 1 merges. |
 | **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ Not started | After Phase 2 merges. |
 
-**Vendored port summary:** [`third_party/cml-cmcd/`](../../third_party/cml-cmcd/) holds 68 JS files (typedefs + enums + constants + encoders + helpers + shims + `CmcdReporter`) + `LICENSE` + `NOTICE` + `SUMMARY.txt`. At HEAD (`d682bb1bb`), both `python3 build/check.py` and `python3 build/build.py` exit 0.
+**Vendored port summary:** [`third_party/cml-cmcd/`](../../third_party/cml-cmcd/) holds 68 JS files (typedefs + enums + constants + encoders + helpers + shims + `CmcdReporter`) + `LICENSE` + `NOTICE` + `SUMMARY.txt`. At HEAD (`adfdfab05`), `python3 build/check.py` exits 0. `python3 build/build.py` was last clean at `d682bb1bb` and is not expected to break under sub-phase D's source-only changes; not re-run this session.
+
+### Sub-phase D landing notes (Tasks 1.10 + 1.10b)
+
+- **Encoding paths now delegate through CML.** `serialize` / `toQuery` / `toHeaders` thread an optional `cml.cmcd.CmcdEncodeOptions` and route to `cml.cmcd.encodeCmcd`. `appendQueryToUri` retained as a thin `goog.Uri`-based adapter (CML's `appendCmcdQuery` takes a data object, not a pre-encoded query string — incompatible signature; Phase 3 deletes the call sites entirely).
+- **`urlToRelativePath` deleted** from `cmcd_manager.js` (and its 9 unit tests). `data.nor` is set to the absolute next-segment URL in `getDataForSegment_`; CML's `nor` formatter (in `cmcd_formatter_map_const.js`) relativizes against `options.baseUrl`. New private helper `shaka.util.CmcdManager.getEncodeOptions_(uri)` derives `baseUrl` from `new URL(uri).origin` (with `offline:`/parse-error guards) and is invoked at all four CMCD-encoding call sites: `appendSrcData`, `appendTextTrackData`, `sendCmcdRequest_`, `applyCmcdDataToRequest_`.
+- **Two intentional wire-format changes shipped:**
+  1. `nor` URLs become root-relative instead of path-relative (matching CTA-5004-B + CML's spec-conformant output).
+  2. `'ld'` / `'lh'` `StreamingFormat` values dropped — LL DASH now emits `sf=d`, LL HLS now emits `sf=h`. `setLowLatency` no longer mutates `sf_`; `getStreamFormat_` no longer branches on `lowLatency_`.
+- **No tests asserted `sf=ld`/`sf=lh`** (verified via repo-wide grep). The `urlToRelativePath` describe-block (9 tests) was the only test deletion in sub-phase D.
 
 ### Key architectural decisions in the port — surface in Phase 1 PR description
 
@@ -44,7 +53,7 @@ Two git stashes exist:
 - `stash@{0}: On feat/cmcd-cml-refactor: accidental-stash-pop-recovery` — created during a sub-phase B subagent's `git stash pop` mishap. Contains contaminated working state from that incident.
 - `stash@{1}: On task/revert-cmcd-v1: CMCD STUFF` — pre-existing user stash. Preserved.
 
-### Resuming work in a new session — sub-phase D prep
+### Resuming work in a new session — sub-phase E prep
 
 - **Verify CML pinned clone** is still at `/tmp/cml-pinned/`. Run `cd /tmp/cml-pinned && git rev-parse HEAD` — should output `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`. If missing or wrong SHA, re-clone:
   ```bash
@@ -52,8 +61,9 @@ Two git stashes exist:
   git clone https://github.com/streaming-video-technology-alliance/common-media-library.git /tmp/cml-pinned
   cd /tmp/cml-pinned && git checkout 22390e35dfbbe1e53d15648d3aace99cdf71f9dd
   ```
-- **Sub-phase D scope:** modify `lib/util/cmcd_manager.js` to replace the static encoders (`serialize`, `toQuery`, `appendQueryToUri`, `urlToRelativePath`) with delegations to `cml.cmcd.encodeCmcd` / `cml.cmcd.appendCmcdQuery` / `cml.cmcd.appendCmcdHeaders`. Drop non-spec `'ld'`/`'lh'` `StreamingFormat` values per Task 1.10b. State machine, sequence numbers, event timing, public API all remain unchanged in this sub-phase.
-- **Sub-phase E (diff testing)** requires user judgment on classifying any wire-format divergences as (a) intentional spec-conformance fix, (b) acceptable alignment with CML, or (c) bugs to fix.
+- **Sub-phase E scope (Tasks 1.11-1.12):** capture pre-delegation baseline + post-delegation wire output for the existing `test/util/cmcd_manager_unit.js` suite, diff, and classify each divergence as (a) intentional spec-conformance fix, (b) acceptable alignment with CML, or (c) bug to fix before shipping Phase 1. Update assertions for (a)/(b); resolve (c) before Phase 1 PR.
+- **Capturing the pre-delegation baseline** requires reverting sub-phase D temporarily. Cleanest: `git checkout 0f69e7f0e -- lib/util/cmcd_manager.js test/util/cmcd_manager_unit.js`, dump test wire output, reset, re-dump post-delegation. (The plan's literal `git stash`/`git stash pop` flow assumed sub-phase D was uncommitted; since it's now committed across `d8d614ce3` + `adfdfab05`, the checkout-from-prior-SHA flow is the equivalent.)
+- **Expected divergence categories** (pre-judgment): `nor` URLs path-relative → root-relative (intentional); CML's SFV encoder vs shaka's old comma-separated encoder may differ on string escaping, key ordering, and whether `v=2` is auto-added per shard in `toHeaders` (CML's `prepareCmcdData` adds `v` for V2; shaka's old encoder didn't). The `v=2` per-shard auto-add is the most likely (c)-class bug — shaka groups data into 4 shards before encoding, so without intervention every shard will emit `v=2`.
 
 ---
 
