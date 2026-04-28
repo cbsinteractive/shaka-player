@@ -5,6 +5,8 @@
 
 goog.provide('cml.cmcd.Cmcd');
 
+goog.requireType('cml.cmcd.CmcdObjectTypeList');
+
 
 /**
  * Common Media Client Data (CMCD) version 2.

@@ -33,8 +33,6 @@ goog.provide('cml.cmcd.encodeSfDict');
 
 /**
  * Structured Field Item.
- *
- * @template V, P
  */
 cml.cmcd.SfItem = class {
   /**
@@ -424,7 +422,7 @@ cml.cmcd.encodeSfDict = function(dict, options = {whitespace: true}) {
   }
 
   const entries = dict instanceof Map ? dict.entries() : Object.entries(dict);
-  const optionalWhiteSpace = (options && options.whitespace) ? ' ' : '';
+  const optionalWhiteSpace = options.whitespace ? ' ' : '';
 
   return Array.from(entries)
       .map(([key, item]) => {
