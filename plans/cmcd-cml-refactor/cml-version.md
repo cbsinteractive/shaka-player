@@ -70,7 +70,7 @@ Plus 6 additional members not in the spec list, present in CML:
 | `sk` | `CmcdEventType.SKIP` | `CmcdEventType.ts:113`, `CmcdEventType.ts:210` |
 | `ce` | `CmcdEventType.CUSTOM_EVENT` | `CmcdEventType.ts:120`, `CmcdEventType.ts:215` |
 
-**Naming clarification (vs spec):** The spec § "CML-side requirements" lists `pe → PLAY_END` and `pc → PLAYBACK_CHANGE` as guesses. Actual mappings are `pe → PLAYER_EXPAND` and `pc → PLAYER_COLLAPSE` (player view UI state changes). Spec doc should be updated.
+**Naming clarification (vs plan):** `plan.md:86` (Task 0.3 description) listed several guessed enum names that turned out wrong. Actual CML mappings: `pe → PLAYER_EXPAND` (not `PLAY_END` / `PLAYER_ERROR`); `pc → PLAYER_COLLAPSE` (not `PLAYBACK_CHANGE`); `t → TIME_INTERVAL` (not `TIMEOUT`); `c → CONTENT_ID` (not `CONTENT_ID_CHANGE`); `b → BACKGROUNDED_MODE` (not `BACKGROUNDED`). The Task 0.3 table above has the correct CML names. Plan doc should be updated for any future re-runs of this verification, though the plan's purpose was just to enumerate codes to verify, not to assert names.
 
 **Confirmed:** Every event type the adapter intends to emit (`ps`, `e`, `t`, `c`, `b`, `m`, `um`, `pe`, `pc`, `rr`) has a CML enum value. Note also that `BITRATE_CHANGE` (which the spec uses without giving a code) is `bc`, present in CML.
 
@@ -247,13 +247,16 @@ In severity order:
    - **Spec assertion that fails:** Spec § "CML-side requirements" row "Sequence numbers per-target — likely present; verify per v2 spec" (verified, but with divergence from shaka's existing semantics).
    - **Recommended action:** Document in Phase 3 PR description as an intentional alignment-with-CML wire change. No code change required in CML or adapter.
 
-5. **`CmcdEventType` constant name mappings.** Spec § "CML-side requirements" lines 530-534 names `pe` and `pc` as `PLAY_END`/`PLAYER_ERROR`/`PLAYBACK_CHANGE`. CML names them `PLAYER_EXPAND`/`PLAYER_COLLAPSE` (UI viewport changes).
-   - **Spec assertion that fails:** Spec § "CML-side requirements" lines 530-534.
-   - **Recommended action:** Update spec doc. No CML defect.
+5. **`CmcdEventType` constant name mappings (in `plan.md`, not `spec.md`).** `plan.md:86` (Task 0.3 description) guessed names for several codes that turned out wrong. Actual CML names: `pe → PLAYER_EXPAND` (plan guessed `PLAY_END or PLAYER_ERROR`); `pc → PLAYER_COLLAPSE` (plan guessed `PLAYBACK_CHANGE`); `t → TIME_INTERVAL` (plan guessed `TIMEOUT or similar`); `c → CONTENT_ID` (plan guessed `CONTENT_ID_CHANGE`); `b → BACKGROUNDED_MODE` (plan guessed `BACKGROUNDED`). `spec.md:530-534` lists only the two-letter codes (no full names) and is unaffected.
+   - **Spec/plan assertion that fails:** `plan.md:86`.
+   - **Recommended action:** Plan doc fix only. No CML defect, no spec.md change required.
 
-6. **`requester` is a constructor parameter, not a config field.** Spec § "Event-mode dispatch via NetworkingEngine" line 449 says "`CmcdReporter` accepts a `requester: (req) => Promise<{status: number}>` config option". It's actually the **second positional arg to the constructor**, not a `CmcdReporterConfig` field.
-   - **Spec assertion that fails:** Spec § "Event-mode dispatch via NetworkingEngine" line 449.
-   - **Recommended action:** Spec doc fix. Implementation-wise, the adapter calls `new CmcdReporter(reporterConfig, requesterFn)` instead of `new CmcdReporter({...reporterConfig, requester: requesterFn})`. Mechanically equivalent.
+6. **`requester` is a constructor parameter, not a config field.** Two places in `spec.md` describe it as a config field:
+   - `spec.md:449` ("`CmcdReporter` accepts a `requester: (req) => Promise<{status: number}>` config option")
+   - `spec.md:511` (CML-side requirements table row: "`requester` config field for event-mode dispatch")
+   - It's actually the **second positional arg to the constructor**, not a `CmcdReporterConfig` field.
+   - **Spec assertion that fails:** `spec.md:449` and `spec.md:511`.
+   - **Recommended action:** Spec doc fix at both locations. Implementation-wise, the adapter calls `new CmcdReporter(reporterConfig, requesterFn)` instead of `new CmcdReporter({...reporterConfig, requester: requesterFn})`. Mechanically equivalent.
 
 Minor: The spec § "Event-mode dispatch via NetworkingEngine" body-conversion code path handles Blob (line 471-474 of spec.md: `else if (cmcdReq.body instanceof Blob) { ... }`). CML never produces Blob bodies. The Blob branch is dead code and the adapter can drop it.
 
@@ -264,7 +267,8 @@ Minor: The spec § "Event-mode dispatch via NetworkingEngine" body-conversion co
 
 **Update spec.md immediately (no code impact):**
 - Replace `timeInterval` with `interval` in the per-target field shape table.
-- Replace `pe → PLAY_END` / `pc → PLAYBACK_CHANGE` with `pe → PLAYER_EXPAND` / `pc → PLAYER_COLLAPSE`.
+- Update `plan.md:86` enum-name guesses (`pe → PLAYER_EXPAND`, `pc → PLAYER_COLLAPSE`, `t → TIME_INTERVAL`, `c → CONTENT_ID`, `b → BACKGROUNDED_MODE`).
+- Fix `spec.md:511` to call `requester` a constructor parameter, not a config field (matches the existing fix at `spec.md:449`).
 - Clarify `recordResponseReceived` data shape is `Partial<Cmcd>` and document the `resourceTiming` indirection.
 - Note `requester` is a constructor arg, not a config field.
 - Drop the Blob branch from the adapter requester sketch.
