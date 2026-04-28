@@ -33,8 +33,8 @@ The spec is mature, but these items need explicit attention during execution rat
 6. **Always-on reporter vs. hls.js [#7725](https://github.com/video-dev/hls.js/pull/7725).** hls.js uses CML's encoders for request mode and reporter for event mode only. Our spec chose always-on reporter for a single integration boundary. **Risk**: in v1-only request-mode-only configurations, we instantiate timers and event infrastructure that the user doesn't need. Captured as Task 3.3.
 7. **`enabled: false` early-out.** Spec says "adapter no-ops when `false`", but the CmcdReporter shouldn't be constructed at all when disabled to avoid timer creation. The lifecycle code must check `enabled` before construction, not just before each `apply*` call. Captured as Task 3.3.
 8. **Demo scope for Phase 3.** Spec § Phase 3 says "Update demo/ to add a CMCD v2 configuration UI" but doesn't enumerate which controls. Pinning a minimum scope: transmission mode toggle, version selector, single eventTarget editor with URL + events checklist. More expansive UI deferred. Captured as Task 3.13.
-9. **`StreamingFormat` value parity.** Spec asserts `'d'`, `'ld'`, `'h'`, `'lh'`, `'s'`, `'o'` match CML's `CmcdStreamingFormat`. Verify before Phase 2 commits to the alias re-export (Task 0.6).
-10. **CML `CmcdEventType` enum membership.** Spec lists `ps`, `e`, `t`, `c`, `b`, `m`, `um`, `pe`, `pc`, `rr`. Verify CML covers all; any missing → upstream PR (Task 0.3).
+9. **`StreamingFormat` value parity.** Phase 0 verified: shaka emits 6 values but CTA-5004 / CTA-5004-B / CML define only 4 (`'d'`/`'h'`/`'s'`/`'o'`). shaka's `'ld'` and `'lh'` come from an old unreleased CMCD draft and are non-spec. Captured as Phase 1 Task 1.10b (drop `'ld'`/`'lh'`); Phase 2 alias re-export then becomes a straightforward identity map (Task 2.3).
+10. **CML `CmcdEventType` enum membership.** Phase 0 verified: CML cmcd-v2.3.0 includes all 10 event types shaka needs (`ps`/`e`/`t`/`c`/`b`/`m`/`um`/`pe`/`pc`/`rr`) plus 7 more (`bc` bitrate change, ad events, skip, custom). Correct CML constant names listed at `plan.md:86`. No upstream PR needed.
 
 ---
 
@@ -83,7 +83,7 @@ The spec's "CML-side requirements" table marks these as "confirmed":
 
 - [ ] **Step 1: Open `libs/cmcd/src/CmcdEventType.ts` in the pinned checkout.**
 
-- [ ] **Step 2: Verify members:** `ps` (PLAY_STATE), `e` (ERROR), `t` (TIMEOUT or similar), `c` (CONTENT_ID_CHANGE), `b` (BACKGROUNDED), `m` (MUTE), `um` (UNMUTE), `pe` (PLAY_END or PLAYER_ERROR), `pc` (PLAYBACK_CHANGE), `rr` (RESPONSE_RECEIVED). Map each two-letter code to its enum constant name.
+- [ ] **Step 2: Verify members and their CML constant names:** `ps → PLAY_STATE`, `e → ERROR`, `t → TIME_INTERVAL`, `c → CONTENT_ID`, `b → BACKGROUNDED_MODE`, `m → MUTE`, `um → UNMUTE`, `pe → PLAYER_EXPAND`, `pc → PLAYER_COLLAPSE`, `rr → RESPONSE_RECEIVED`. (Names verified against CML cmcd-v2.3.0 in `cml-version.md` Task 0.3.)
 
 - [ ] **Step 3: For any missing member, file a CML PR adding it.** Example: if `pc` is absent, file `feat(cmcd): add CmcdEventType.PLAYBACK_CHANGE` upstream.
 
@@ -170,7 +170,12 @@ Spec marks this "likely present; verify per v2 spec".
 
 **Goal:** Add the vendored Closure port of `@svta/cml-cmcd`. Refactor shaka's static encoding helpers (`serialize`, `toQuery`, `appendQueryToUri`, `urlToRelativePath`) to delegate to CML's encoders. State machine, sequence numbers, event timing, and public API stay unchanged.
 
-**Behavior:** Preserved, with **one documented intentional change**: `nor` URLs become root-relative (CML's spec-conformant output) rather than path-relative. Phase 1 PR description must call this out as the one known intentional wire-format change. Diff testing during this phase surfaces any other unintentional divergences for case-by-case decisions.
+**Behavior:** Preserved, with **two documented intentional wire-format changes** for spec conformance:
+
+1. `nor` URLs become root-relative (CML's spec-conformant output) rather than path-relative.
+2. `sf` (streaming format) drops the non-spec values `'ld'` (LL-DASH) and `'lh'` (LL-HLS); LL DASH emits `sf=d`, LL HLS emits `sf=h`. Per Phase 0 verification (`cml-version.md` finding #1): `'ld'`/`'lh'` come from an old unreleased CMCD draft and are not in CTA-5004 or CTA-5004-B; CML correctly omits them.
+
+Phase 1 PR description must call out both. Diff testing during this phase surfaces any other unintentional divergences for case-by-case decisions.
 
 **Reference PRs to consult for patterns:**
 - [hls.js #7725](https://github.com/video-dev/hls.js/pull/7725) — note: their request-mode encoding uses CML encoders directly without going through `CmcdReporter`. Our Phase 3 changes that to always-on reporter; Phase 1 is closer to their request-mode pattern (encoders only).
@@ -255,11 +260,12 @@ chore(cmcd): port cml-cmcd type definitions as closure typedefs
 
   Example pattern for CML's `as const` enum:
   ```typescript
-  // CmcdStreamingFormat.ts
+  // CmcdStreamingFormat.ts (CML cmcd-v2.3.0)
   export const CmcdStreamingFormat = {
     DASH: 'd',
-    LOW_LATENCY_DASH: 'ld',
-    // ...
+    HLS: 'h',
+    SMOOTH: 's',
+    OTHER: 'o',
   } as const;
   export type CmcdStreamingFormat = ValueOf<typeof CmcdStreamingFormat>;
   ```
@@ -271,8 +277,9 @@ chore(cmcd): port cml-cmcd type definitions as closure typedefs
   /** @enum {string} */
   cml.cmcd.CmcdStreamingFormat = {
     DASH: 'd',
-    LOW_LATENCY_DASH: 'ld',
-    // ...
+    HLS: 'h',
+    SMOOTH: 's',
+    OTHER: 'o',
   };
   ```
 
@@ -458,7 +465,7 @@ chore(cmcd): port cml-cmcd CmcdReporter to closure
 
 - [ ] **Step 3: Run `python3 build/build.py`.** Confirm the bundle compiles with the vendored port inside.
 
-- [ ] **Step 4: Append spell-checker vocab to `project-words.txt`.** New CMCD-only words: `Cmcd` (likely already present), `cml`, `svta`, `mtp`, `nrr`, `cmsd`, `cmsds`, `cmsdd`, `ttfb`, `ttlb`, `ld`, `lh`, `ps`, `bg`, `pe`, `pc`, `rr`, `um`, `sta`, ... Run `python3 build/check.py` to see which are missing; add only those.
+- [ ] **Step 4: Append spell-checker vocab to `project-words.txt`.** New CMCD-only words: `Cmcd` (likely already present), `cml`, `svta`, `mtp`, `nrr`, `cmsd`, `cmsds`, `cmsdd`, `ttfb`, `ttlb`, `ps`, `bg`, `pe`, `pc`, `rr`, `um`, `sta`, ... Run `python3 build/check.py` to see which are missing; add only those. (Note: `ld` and `lh` are dropped in Task 1.10b as non-spec values; if they were previously in `project-words.txt`, remove them.)
 
 - [ ] **Step 5: Commit:**
 
@@ -491,6 +498,49 @@ Per spec § Phase 1.
 - [ ] **Step 4: Run `python3 build/check.py`.** Fix any type or import errors.
 
 **Acceptance:** All four static methods now delegate. Manager file is shorter by the deleted method bodies.
+
+### Task 1.10b: Drop non-spec `'ld'`/`'lh'` from `StreamingFormat`
+
+**Files:**
+- Modify: `lib/util/cmcd_manager.js`
+
+Per Phase 0 finding #1 (`cml-version.md` Task 0.6): shaka's `'ld'` (LOW_LATENCY_DASH) and `'lh'` (LOW_LATENCY_HLS) values are not in CTA-5004 or CTA-5004-B. CML correctly omits them. Drop them from shaka in Phase 1 alongside encoding delegation; this is the second of Phase 1's two intentional wire-format changes (the other is `nor` URL relativization).
+
+- [ ] **Step 1: Remove the non-spec values from the enum** in `lib/util/cmcd_manager.js:1612-1619`:
+
+```javascript
+shaka.util.CmcdManager.StreamingFormat = {
+  DASH: 'd',
+  HLS: 'h',
+  SMOOTH: 's',
+  OTHER: 'o',
+};
+```
+
+- [ ] **Step 2: Simplify `setLowLatency` body** at `cmcd_manager.js:177-194`. The function currently flips `this.sf_` between `DASH ↔ LOW_LATENCY_DASH` and `HLS ↔ LOW_LATENCY_HLS`; after the drop, the LL state has no effect on `sf_`. Either delete the `if (this.lowLatency_)` branches entirely (preferred — `sf_` is set at manifest-load time and stays put), or leave a no-op stub for the LL flag if other code reads it.
+
+- [ ] **Step 3: Grep for remaining LL enum references.**
+  ```bash
+  grep -n "LOW_LATENCY_DASH\|LOW_LATENCY_HLS\|StreamingFormat\.LOW_LATENCY" lib/ test/
+  ```
+  Update any callers to drop the LL branches. Likely candidates: `getStreamFormat_` and any tests that asserted `sf=ld`/`sf=lh`.
+
+- [ ] **Step 4: Update tests** in `test/util/cmcd_manager_unit.js` that expected `sf=ld` or `sf=lh`. After this change, LL DASH content emits `sf=d`; LL HLS emits `sf=h`. The assertions become identical to their non-LL counterparts.
+
+- [ ] **Step 5: Run `python3 build/check.py` and `python3 build/test.py`.** Fix any compile errors and update broken assertions per Step 4.
+
+- [ ] **Step 6: Commit:**
+
+```
+fix(cmcd): drop non-spec 'ld'/'lh' StreamingFormat values
+
+CTA-5004 and CTA-5004-B define only 'd', 'h', 's', 'o' for the sf key.
+shaka's 'ld' (LOW_LATENCY_DASH) and 'lh' (LOW_LATENCY_HLS) come from an
+old unreleased draft and are not in either spec. CML correctly omits
+them. Wire change: LL DASH now emits sf=d, LL HLS now emits sf=h.
+```
+
+**Acceptance:** Enum has 4 values (DASH, HLS, SMOOTH, OTHER). `setLowLatency` no longer mutates `sf_`. Tests pass with non-LL `sf` values for LL content. Phase 1 PR description lists this as the second intentional wire-format change alongside `nor` URL relativization.
 
 ### Task 1.11: Diff testing — capture baseline
 
@@ -654,6 +704,8 @@ diff -u plans/cmcd-cml-refactor/diff-test-baseline.json plans/cmcd-cml-refactor/
 
 **Files:**
 - Modify: `lib/util/cmcd_manager.js` — add the alias
+
+After Phase 1 Task 1.10b dropped the non-spec `'ld'`/`'lh'` values, shaka's `StreamingFormat` enum is a strict subset of CML's: same 4 spec-conformant values (`'d'`/`'h'`/`'s'`/`'o'`), same constant names (DASH/HLS/SMOOTH/OTHER). The alias re-export is straightforward; no derived/extended enum needed.
 
 - [ ] **Step 1: Add the re-export:**
 
@@ -903,7 +955,7 @@ this.eventManager_.listen(this.player_, 'error', () => {
 
 - [ ] **Step 3: Implement throughput-update wiring.** Whatever shaka's existing throughput-change signal is (likely `shaka.abr.EwmaBandwidthEstimator` updates flowing through `shaka.Player`), feed `mtp` into `reporter.update(...)` as it changes.
 
-- [ ] **Step 4: Implement low-latency streamingFormat update** in response to `setLowLatency` calls + manifest type. Spec table covers this.
+- [ ] **Step 4: Set `streamingFormat` once at manifest-load time.** Feed `update({streamingFormat: ...})` from the manifest parser type (DASH → `'d'`, HLS → `'h'`, Smooth → `'s'`, otherwise `'o'`). **Do NOT mutate `streamingFormat` on `setLowLatency` callbacks** — Phase 1 dropped the non-spec `'ld'`/`'lh'` values, and `sf` is per CTA-5004-B a stable manifest-type indicator, not an LL flag.
 
 - [ ] **Step 5: Run `python3 build/check.py`.**
 
@@ -964,10 +1016,10 @@ toReporterConfig_(cfg) {
     reporterConfig.eventTargets = cfg.eventTargets.map((target) => ({
       url: target.url,
       events: target.events,
-      timeInterval: target.timeInterval,
+      interval: target.interval,          // CML field name (was timeInterval)
       batchSize: target.batchSize,
       enabledKeys: target.includeKeys,    // rename: includeKeys (shaka) → enabledKeys (CML)
-      version: target.version,            // only if CML supports per-target version (Task 0.5)
+      version: target.version,            // CML supports per-target version (Task 0.5 confirmed)
     }));
   }
   return reporterConfig;
@@ -1012,14 +1064,9 @@ makeRequester_() {
     shakaReq.method = cmcdReq.method || 'POST';
     shakaReq.headers = cmcdReq.headers || {};
 
-    // CML may emit body as string (structured-fields) or Blob (JSON).
-    if (typeof cmcdReq.body === 'string') {
-      shakaReq.body = shaka.util.StringUtils.toUTF8(cmcdReq.body);
-    } else if (cmcdReq.body instanceof Blob) {
-      shakaReq.body = await cmcdReq.body.arrayBuffer();
-    } else {
-      shakaReq.body = cmcdReq.body;  // already BufferSource
-    }
+    // CML's reporter always emits body as a string (structured-fields
+    // encoded by encodeCmcd, joined by '\n'). Convert to BufferSource.
+    shakaReq.body = shaka.util.StringUtils.toUTF8(cmcdReq.body);
 
     try {
       await this.networkingEngine_
@@ -1033,7 +1080,7 @@ makeRequester_() {
 }
 ```
 
-- [ ] **Step 2: Verify the body-conversion against Task 0.8's findings.** If CML never emits Blob, drop that branch. If CML emits something else (e.g., `Uint8Array`), add that branch.
+- [ ] **Step 2: Body type is fixed to `string`** per Phase 0 Task 0.8 verification (`cml-version.md`): CML's `sendEventReport` constructs `body: data.map(item => encodeCmcd(item, options)).join('\n') + '\n'` — never Blob, never Uint8Array. The Blob branch from earlier sketches is dead code.
 
 - [ ] **Step 3: Stash `this.networkingEngine_` reference** somewhere in the constructor or `setMediaElement` (the existing `cmcd_manager.js` likely already has this; verify).
 
@@ -1132,7 +1179,7 @@ Per spec § "Phase 3 — Test rewrite".
 
 - [ ] **Step 2: Add Bucket B tests** (~500 lines, shaka-specific glue). Use a stubbed `CmcdReporter` that records calls. Cover:
   - `RequestType` (MANIFEST, SEGMENT, LICENSE, KEY, TIMING) → `CmcdObjectType` mapping.
-  - `RequestContext.type` → `CmcdStreamingFormat` mapping (DASH/LL-DASH/HLS/LL-HLS/Smooth/Other).
+  - `RequestContext.type` → `CmcdStreamingFormat` mapping (DASH/HLS/Smooth/Other; LL DASH and LL HLS map to plain DASH/HLS per Phase 1 Task 1.10b).
   - Config translation (`toReporterConfig_` outputs given various `shaka.extern.CmcdConfiguration` inputs).
   - Player-event listener wiring: simulate `<video>` events, assert `reporter.update(...)` and `recordEvent(...)` calls.
   - NetworkingEngine routing: stub the reporter's `requester` callback; assert it dispatches via `NetworkingEngine.request(RequestType.TIMING, ...)`; assert error → `{status: 0}` translation.

@@ -296,9 +296,22 @@ need to adjust path-resolution logic).
 `applyResponseData` flow:
 
 1. Adapter measures `ttfb`/`ttlb` via existing `requestTimestampMap_` mechanism.
-2. Adapter calls `reporter.recordResponseReceived(response, {ttfb, ttlb, rc, url})`.
-3. Reporter buffers response data for the next emission opportunity (and
-   internally fires the v2 `rr` "response received" event when configured).
+2. Adapter calls `reporter.recordResponseReceived(response, data)`. CML's
+   signature is `recordResponseReceived(response: HttpResponse, data:
+   Partial<Cmcd> = {})` — both args are CMCD-shaped, not the flat
+   `{ttfb, ttlb, rc, url}` shape. Two valid call patterns:
+   - **Primary path** (let CML derive): synthesize a `ResourceTiming`
+     object on `response.resourceTiming` (`{startTime, responseStart,
+     duration}`); CML auto-derives `ts`, `ttfb`, `ttlb`. `rc` comes from
+     `response.status`. `url` comes from `response.request.url`.
+   - **Override path:** pass `{ttfb, ttlb, rc, url}` (or any subset) as
+     the `data` argument. Override values win over auto-derived ones.
+   Adapter is free to mix: e.g., supply `resourceTiming` for `ts` while
+   passing pre-computed `ttfb`/`ttlb` from `requestTimestampMap_`.
+3. `recordResponseReceived` returns `void` — no fields to copy back to
+   `response`. Reporter buffers response data for the next emission
+   opportunity (and internally fires the v2 `rr` "response received"
+   event when configured).
 
 The shaka-specific extraction helpers
 (`getObjectType_`, `getBitrate_`, `getDuration_`, `getTopBitrate_`,
@@ -343,7 +356,7 @@ configures one event-reporting endpoint. Shape (post-rename):
 |---|---|---|
 | `url` | `string` | Endpoint URL for CMCD event reports |
 | `events` | `Array<CmcdEventType>` | Which events trigger reports (e.g., `[PLAY_STATE, ERROR, RESPONSE_RECEIVED]`); empty / undefined = none |
-| `timeInterval` | `number` *(seconds)* | Periodic time-interval reports (`0` disables; CML default per `CMCD_DEFAULT_TIME_INTERVAL`) |
+| `interval` | `number` *(seconds)* | Periodic time-interval reports (`0` disables; CML default `CMCD_DEFAULT_TIME_INTERVAL = 30`). Field name matches CML's `CmcdEventReportConfig.interval`. |
 | `batchSize` | `number` | Number of events to batch before dispatch (default `1` = no batching) |
 | `includeKeys` | `Array<CmcdKey>` *(was `enabledKeys`)* | Subset of CMCD keys to include in this target's reports |
 | `version` | `1 \| 2` | Per-target version override; defaults to top-level `version` |
@@ -355,8 +368,9 @@ matching hls.js PR #7725's pattern. The adapter renames `includeKeys` →
 
 Update [`externs/shaka/player.js`](externs/shaka/player.js)
 `shaka.extern.CmcdTarget` typedef to reflect this shape; existing fields
-in the typedef (e.g., `events`, `timeInterval`) stay; renamed field is
-`enabledKeys` → `includeKeys`.
+in the typedef (e.g., `events`) stay; renamed fields are
+`enabledKeys` → `includeKeys` and `timeInterval` → `interval` (matches
+CML's `CmcdEventReportConfig`).
 
 ### Player state ↔ reporter state mapping
 
@@ -378,13 +392,23 @@ state, then `recordEvent()` to emit a v2 event noting the transition.
 | Ended | `update({playerState: ENDED})` + `recordEvent(PLAY_STATE)` |
 | Fatal error | `update({playerState: FATAL_ERROR})` + `recordEvent(ERROR)` |
 | Variant switch (bitrate change) | `update({br: [newBitrate]})` + `recordEvent(BITRATE_CHANGE)` |
-| `setLowLatency(true)` + DASH | `update({streamingFormat: LOW_LATENCY_DASH})` |
-| `setLowLatency(true)` + HLS | `update({streamingFormat: LOW_LATENCY_HLS})` |
 | Content ID changes | `update({cid: newId})` (CML emits the v2 `c` event internally) |
 | Visibility → backgrounded | `update({backgrounded: bool})` (CML emits the v2 `b` event internally) |
 | Mute | `update({muted: true})` + `recordEvent(MUTE)` |
 | Unmute | `update({muted: false})` + `recordEvent(UNMUTE)` |
 | Throughput estimate update | `update({mtp: [bandwidthKbps]})` |
+
+**Streaming format and low-latency.** `sf` reflects the manifest type only
+(`'d'`/`'h'`/`'s'`/`'o'`) — not the low-latency state. shaka previously
+emitted `'ld'`/`'lh'` for LL DASH/HLS, but those values are not in
+CTA-5004 or CTA-5004-B; CML correctly omits them. Phase 1 drops the LL
+mutation in shaka's `setLowLatency` so that LL DASH emits `sf=d` and LL
+HLS emits `sf=h`. This is a wire-format change called out alongside
+`nor` URL relativization in the Phase 1 PR description.
+
+Also note manifest type is set once at load time and rarely changes; the
+adapter feeds `streamingFormat` via `update()` from the manifest parser,
+not from a `setLowLatency` callback.
 
 **Player-state deduplication.** Adapter tracks the last-emitted
 `playerState` and skips both `update` and `recordEvent` when the new state
@@ -406,10 +430,13 @@ MSD is computed internally by `CmcdReporter`; the adapter does not feed it.
 
 ### Public-API back-compat details
 
-- **`shaka.util.CmcdManager.StreamingFormat`** stays available with identical
-  string values. Implemented as a re-export alias of
-  `cml.cmcd.CmcdStreamingFormat`. `@export` annotation preserved. Verified
-  values match: `'d'`, `'ld'`, `'h'`, `'lh'`, `'s'`, `'o'`.
+- **`shaka.util.CmcdManager.StreamingFormat`** stays available, implemented
+  as a re-export alias of `cml.cmcd.CmcdStreamingFormat`. `@export`
+  annotation preserved. Spec-conformant values: `'d'`, `'h'`, `'s'`, `'o'`.
+  shaka's previously-shipped non-spec values `'ld'` (LL-DASH) and `'lh'`
+  (LL-HLS) — from an old unreleased CMCD draft, not in CTA-5004 or
+  CTA-5004-B — are dropped in Phase 1. Wire-format change: LL DASH emits
+  `sf=d`, LL HLS emits `sf=h`.
 - **`shaka.util.CmcdManager.{ObjectType,Version,StreamType,CmcdKeys,CmcdV2Constants,CmcdV2Keys,CmcdMode}`**
   are all internal-only (no `@export`). Deleted in Phase 2; references rewritten to `cml.cmcd.*`.
 - **`externs/cmcd.js`** (`CmcdData` typedef): kept as the public-facing typedef
@@ -445,9 +472,11 @@ conservative API surface.
 
 ### Event-mode dispatch via NetworkingEngine
 
-`CmcdReporter` accepts a `requester: (req) => Promise<{status: number}>`
-config option for dispatching event-mode reports. **Event-mode transport is
-HTTP POST with a body** — CML constructs each event request as
+`CmcdReporter`'s constructor takes a `requester: (req) =>
+Promise<{status: number}>` callback as its **second positional argument**
+(not a `CmcdReporterConfig` field) for dispatching event-mode reports:
+`new CmcdReporter(reporterConfig, requesterFn)`. **Event-mode transport
+is HTTP POST with a body** — CML constructs each event request as
 `method: 'POST'` with the encoded CMCD payload in the body (per dash.js
 PR #4816's `Constants.CMCD_MODE_BODY` precedent and CML's reporter source).
 This is distinct from request-mode encoding (which mutates an existing
@@ -464,15 +493,10 @@ const requester = async (cmcdReq) => {
   shakaReq.method = cmcdReq.method || 'POST';
   shakaReq.headers = cmcdReq.headers || {};
 
-  // CML may emit body as string (structured-fields) or Blob (JSON).
-  // shaka.extern.Request.body expects BufferSource; convert:
-  if (typeof cmcdReq.body === 'string') {
-    shakaReq.body = shaka.util.StringUtils.toUTF8(cmcdReq.body);
-  } else if (cmcdReq.body instanceof Blob) {
-    shakaReq.body = await cmcdReq.body.arrayBuffer();
-  } else {
-    shakaReq.body = cmcdReq.body;  // already BufferSource
-  }
+  // CML's reporter always emits body as a string (structured-fields
+  // encoded by encodeCmcd, joined by '\n'). shaka.extern.Request.body
+  // expects BufferSource; convert via UTF-8.
+  shakaReq.body = shaka.util.StringUtils.toUTF8(cmcdReq.body);
 
   try {
     await this.networkingEngine_
@@ -508,7 +532,7 @@ upstream in CML if missing.
 | `reporter.recordEvent(eventType, data)` for discrete event emission | confirmed |
 | `reporter.createRequestReport(request, data)` for request-mode encoding | confirmed (CML signature: `R & CmcdRequestReport<R['customData']>`) |
 | `reporter.recordResponseReceived(response, data)` | confirmed |
-| `requester` config field for event-mode dispatch | confirmed (CML constructs `method: 'POST'` with body) |
+| `requester` constructor parameter (2nd positional arg) for event-mode dispatch | confirmed (CML constructs `method: 'POST'` with string body, `Content-Type: application/cmcd`) |
 | Built-in time-interval event timer | confirmed (reporter owns; shaka stops running its own) |
 | MSD computed internally by reporter | confirmed |
 | Sequence numbers per-target | likely present; verify per v2 spec |
@@ -588,9 +612,15 @@ behavior-preserving except where explicitly noted.
 - Apply config renames in [`externs/shaka/player.js`](externs/shaka/player.js):
   - `shaka.extern.CmcdConfiguration.targets` → `eventTargets`
   - `shaka.extern.CmcdTarget.enabledKeys` → `includeKeys`
+  - `shaka.extern.CmcdTarget.timeInterval` → `interval`
 - Add v2 re-exports: `shaka.util.CmcdManager.EventType` (alias of
   `cml.cmcd.CmcdEventType`), `shaka.util.CmcdManager.PlayerState` (alias of
   `cml.cmcd.CmcdPlayerState`).
+- **Wire-format changes (alignment with CML, intentional):** sequence
+  numbers shift from 1-based to 0-based (CML uses 0); request-mode `sn`
+  becomes a single global counter rather than scoped per-target-hash;
+  `sn` resets on `sid` change (CML's `resetSession` triggered from
+  `update()` when a new `sid` is set). Flag in PR description.
 - Update [`demo/`](demo/) to add a CMCD v2 configuration UI (transmission
   mode picker, version selector, eventTarget editor). Mirrors the
   precedent set by dash.js's `samples/cmcd/cmcd-v2.html` and
@@ -651,7 +681,7 @@ responsibilities. Target ~500 lines. Mocks `CmcdReporter` with a stub that
 records calls; asserts call sequences.
 
 - `RequestType` (MANIFEST, SEGMENT, LICENSE, KEY, TIMING) → `CmcdObjectType` mapping
-- `RequestContext.type` → `CmcdStreamingFormat` (DASH/LL-DASH/HLS/LL-HLS/Smooth/Other)
+- `RequestContext.type` → `CmcdStreamingFormat` (DASH/HLS/Smooth/Other; LL DASH and LL HLS map to plain DASH/HLS per CTA-5004-B)
 - `shaka.extern.CmcdConfiguration` → `cml.cmcd.CmcdReporterConfig` translation,
   including the experimental renames
 - Player-event listener wiring: simulate `<video>` events / player state

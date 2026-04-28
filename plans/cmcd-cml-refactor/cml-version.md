@@ -14,18 +14,18 @@ Local checkout used: `/tmp/cml-pinned` (at SHA above)
 
 The pinned version (`cmcd-v2.3.0`, npm `2.3.0`) is the latest stable release as of 2026-04-27 — spec assumption confirmed.
 
-Verification surfaced **6 substantive gaps** between the spec and CML's actual public surface. Most are spec inaccuracies that should be corrected before Phase 1, not CML defects requiring upstream PRs:
+Verification surfaced **6 doc/conformance fixes** between the spec and CML's actual public surface. **Zero blockers** — none require CML upstream PRs. Findings #2–#6 are spec/plan doc fixes; finding #1 is a shaka spec-conformance fix (drop non-spec values) applied within Phase 1:
 
-1. **`CmcdStreamingFormat` is missing `LOW_LATENCY_DASH` (`'ld'`) and `LOW_LATENCY_HLS` (`'lh'`).** CML only defines DASH/HLS/SMOOTH/OTHER. Shaka has all six. This is a real CML gap blocking Phase 2's alias re-export — needs either a CML upstream PR adding the LL variants, or shaka must keep its own `StreamingFormat` enum and stop re-exporting CML's.
+1. **shaka's `'ld'` (LL-DASH) and `'lh'` (LL-HLS) `StreamingFormat` values are non-spec.** They originate from an old, unreleased CMCD draft. CML correctly omits them; CTA-5004 and CTA-5004-B both define only `'d'`/`'h'`/`'s'`/`'o'`. Shaka has been emitting non-conformant `sf` values. **Resolution:** drop `'ld'`/`'lh'` from shaka in Phase 1 alongside encoding delegation. LL DASH emits `sf=d`, LL HLS emits `sf=h`. Wire-format change to flag in Phase 1 PR description.
 2. **`CmcdEventReportConfig.timeInterval` is named `interval` in CML.** Spec's per-target table calls it `timeInterval`; the field is `interval` in CML source. Cosmetic spec fix; adapter must use `interval`.
 3. **`CmcdEventType` has 17 members, not the 10 listed in the spec.** All 10 spec members are present. CML adds: `BITRATE_CHANGE` (`bc`), `AD_START` (`as`), `AD_END` (`ae`), `AD_BREAK_START` (`abs`), `AD_BREAK_END` (`abe`), `SKIP` (`sk`), `CUSTOM_EVENT` (`ce`). No gap — spec just under-listed.
 4. **`recordResponseReceived` data shape uses `response.resourceTiming` (not a flat `{ttfb, ttlb}` data object).** The reporter auto-derives `ttfb`/`ttlb`/`ts` from `response.resourceTiming.{startTime, responseStart, duration}`. The `data` override is still `Partial<Cmcd>` and adapter-supplied `ttfb`/`ttlb`/`rc`/`url` values override the derived ones. Adapter has two valid paths: synthesize a `ResourceTiming`-shaped object on the response, or pass the values directly via the data override. Spec is partially right (field names match) but doesn't reflect the `resourceTiming` indirection.
 5. **`createRequestReport` returns a derived object as spec said, but `recordResponseReceived` returns `void`.** Spec is correct on both counts. No `applyResponseData` "copy back" step is required — CML's response flow is purely state-recording (it queues an internal `rr` event for any configured event-mode targets). Adapter's `applyResponseData` does not need to mutate `response` based on CML output.
 6. **CML's request-mode sequence numbers are global, not per-target.** Single counter `requestTarget.sn` for all request-mode reports; one counter per event target. Shaka currently has separate `{request, response}` counters per per-config-hash target. CML does not split request from response — `rr` events use the per-event-target counter, request reports use the global `requestTarget` counter. This is a wire-format divergence that should be flagged in the Phase 3 PR.
 
-Beyond the gaps above, all other spec assertions verified cleanly: lifecycle methods, `requester` callback contract, `CmcdEventReportConfig` field set (modulo the `interval` rename), per-target `version` IS exposed (spec § Open Questions Q3 resolved — keep the per-target `version` field).
+Beyond the findings above, all other spec assertions verified cleanly: lifecycle methods, `requester` callback contract, `CmcdEventReportConfig` field set (modulo the `interval` rename), per-target `version` IS exposed (spec § Open Questions Q3 resolved — keep the per-target `version` field).
 
-**Recommended next step:** Proceed to Phase 1 only after (a) the spec doc is updated to reflect findings #2, #3, #4, #5, #6, and (b) a decision is made on finding #1 (LL streaming format gap). Recommend filing a CML upstream PR adding `LOW_LATENCY_DASH` and `LOW_LATENCY_HLS` to `CmcdStreamingFormat` — this aligns with CMCD v2 spec and keeps the alias-re-export plan viable. Findings #2–#6 are spec/doc-only fixes and don't gate implementation.
+**Recommended next step:** Proceed to Phase 1. CML version pin remains `cmcd-v2.3.0`; no upstream PRs required. Apply the doc fixes (findings #2–#6) and the LL-value drop (finding #1) as part of Phase 1's wire-format-alignment work, alongside the already-planned `nor` URL relativization change.
 
 ## Task 0.2 — Lifecycle methods
 
@@ -135,20 +135,22 @@ Also inherited from `CmcdReportConfig`:
 
 ## Task 0.6 — `CmcdStreamingFormat` value parity
 
-| Spec value | shaka value | CML value | File:line | Status |
+| Spec-conformant value | shaka value | CML value | File:line | Status |
 |---|---|---|---|---|
 | `'d'` (DASH) | `DASH: 'd'` (`cmcd_manager.js:1613`) | `DASH: 'd'` | `CmcdStreamingFormat.ts:16` | **Match** |
 | `'h'` (HLS) | `HLS: 'h'` (`cmcd_manager.js:1615`) | `HLS: 'h'` | `CmcdStreamingFormat.ts:21` | **Match** |
 | `'s'` (SMOOTH) | `SMOOTH: 's'` (`cmcd_manager.js:1617`) | `SMOOTH: 's'` | `CmcdStreamingFormat.ts:26` | **Match** |
 | `'o'` (OTHER) | `OTHER: 'o'` (`cmcd_manager.js:1618`) | `OTHER: 'o'` | `CmcdStreamingFormat.ts:31` | **Match** |
-| `'ld'` (LL-DASH) | `LOW_LATENCY_DASH: 'ld'` (`cmcd_manager.js:1614`) | **MISSING** | n/a | **GAP** |
-| `'lh'` (LL-HLS) | `LOW_LATENCY_HLS: 'lh'` (`cmcd_manager.js:1616`) | **MISSING** | n/a | **GAP** |
+| *(non-spec)* | `LOW_LATENCY_DASH: 'ld'` (`cmcd_manager.js:1614`) | *(correctly omitted)* | n/a | **shaka non-conformant** |
+| *(non-spec)* | `LOW_LATENCY_HLS: 'lh'` (`cmcd_manager.js:1616`) | *(correctly omitted)* | n/a | **shaka non-conformant** |
 
-CML defines only DASH/HLS/SMOOTH/OTHER (`CmcdStreamingFormat.ts:12-32`). The 4 string values that CML defines all match shaka. **Two LL variants used by shaka are absent from CML.**
+CML defines only DASH/HLS/SMOOTH/OTHER (`CmcdStreamingFormat.ts:12-32`). All 4 spec-conformant values match between shaka and CML.
 
-**Impact:** Phase 2 plan calls for re-exporting `shaka.util.CmcdManager.StreamingFormat` as an alias of `cml.cmcd.CmcdStreamingFormat`. With LL variants missing, this alias would be a regression for any shaka user reading `LOW_LATENCY_DASH`/`LOW_LATENCY_HLS` from the public enum. Shaka also uses these internally (`cmcd_manager.js:177-194` — `setLowLatency` flips `sf_` between `DASH ↔ LOW_LATENCY_DASH` and `HLS ↔ LOW_LATENCY_HLS`).
+**Re shaka's `'ld'`/`'lh'` values:** These originate from an old, unreleased CMCD draft and are not present in either CTA-5004 (CMCD v1) or CTA-5004-B (CMCD v2). CML is correct to omit them; shaka has been emitting non-conformant `sf` values. The maintainer (who owns both repos) confirmed CML's omission is intentional.
 
-**Recommended action:** **File CML upstream PR** adding `LOW_LATENCY_DASH: 'ld'` and `LOW_LATENCY_HLS: 'lh'`. The CMCD v2 spec section on Streaming Format (referenced by CML's JSDoc link) covers low-latency variants, so this is a CML completeness gap, not a shaka extension. PR title: `feat(cmcd): add LOW_LATENCY_DASH and LOW_LATENCY_HLS to CmcdStreamingFormat`. Phase 2's alias re-export is blocked on this PR landing and being released.
+**Impact:** Phase 2's alias re-export plan is **unblocked** — once shaka drops `'ld'`/`'lh'`, shaka's enum becomes a strict subset of CML's, and `shaka.util.CmcdManager.StreamingFormat = cml.cmcd.CmcdStreamingFormat` works straightforwardly. shaka's internal `setLowLatency` flow (`cmcd_manager.js:177-194` — flipping `sf_` between `DASH ↔ LOW_LATENCY_DASH` and `HLS ↔ LOW_LATENCY_HLS`) needs simplification: LL DASH stays at `'d'`, LL HLS stays at `'h'`.
+
+**Recommended action:** Drop `LOW_LATENCY_DASH` and `LOW_LATENCY_HLS` from `shaka.util.CmcdManager.StreamingFormat` and remove `setLowLatency`'s `sf_` mutation in **Phase 1**, alongside the encoding delegation. This is a wire-format change — flag in the Phase 1 PR description alongside `nor` URL relativization. No CML PR required.
 
 ## Task 0.7 — Sequence-number behavior
 
@@ -229,11 +231,11 @@ Default requester (`CmcdReporter.ts:50-53`): `(request) => fetch(request.url, re
 
 ## Gaps found
 
-In severity order:
+No CML defects. All findings are doc fixes (spec/plan accuracy) or shaka spec-conformance fixes:
 
-1. **`CmcdStreamingFormat` missing LL variants.** CML lacks `LOW_LATENCY_DASH: 'ld'` and `LOW_LATENCY_HLS: 'lh'`. Spec's Phase 2 alias re-export is blocked on these landing in CML.
-   - **Spec assertion that fails:** Spec § "Public-API back-compat details" lines 411-412 ("Verified values match: `'d'`, `'ld'`, `'h'`, `'lh'`, `'s'`, `'o'`."), Phase 2 § "Re-export `shaka.util.CmcdManager.StreamingFormat` as alias of `cml.cmcd.CmcdStreamingFormat`".
-   - **Recommended action:** **File CML upstream PR** adding both values. Block Phase 2's alias re-export until CML PR ships and is released. Alternative (worse): keep shaka's own enum and skip the alias re-export entirely; Phase 2 then deletes less.
+1. **shaka's `'ld'`/`'lh'` `StreamingFormat` values are non-spec; drop in Phase 1.** These come from an old unreleased CMCD draft. CML correctly omits them per CTA-5004 / CTA-5004-B.
+   - **Spec assertion that fails:** Spec § "Public-API back-compat details" lines 411-412 ("Verified values match: `'d'`, `'ld'`, `'h'`, `'lh'`, `'s'`, `'o'`.") — claim is wrong on the LL variants.
+   - **Recommended action:** Drop `'ld'`/`'lh'` from `shaka.util.CmcdManager.StreamingFormat` in Phase 1. Wire-format change: LL DASH emits `sf=d`, LL HLS emits `sf=h` (instead of `sf=ld`/`sf=lh`). Flag in Phase 1 PR description. No CML PR required.
 
 2. **`CmcdEventReportConfig.timeInterval` is `interval` in CML.** Spec doc uses `timeInterval` throughout § "Per-target eventTargets[] field shape" and the experimental rename table.
    - **Spec assertion that fails:** Spec § "Per-target eventTargets[] field shape" row 3 (`timeInterval`).
@@ -262,19 +264,22 @@ Minor: The spec § "Event-mode dispatch via NetworkingEngine" body-conversion co
 
 ## Recommended next step
 
-**Hold Phase 1 implementation until:**
-- A CML upstream PR adding `LOW_LATENCY_DASH` and `LOW_LATENCY_HLS` to `CmcdStreamingFormat` is merged and released (estimate: low effort given user maintains both repos).
+**Proceed to Phase 1.** CML version pin remains `cmcd-v2.3.0` (`22390e35`); no upstream PRs required. Apply the doc updates below, fold the `'ld'`/`'lh'` drop into Phase 1 alongside encoding delegation, then begin Phase 1 implementation.
 
 **Doc-only updates (no code impact):**
 
 ### Update plan.md
 - `plan.md:86` (Task 0.3 description) — replace the enum-name guesses with the correct CML constant names from Task 0.3's table above. Specifically: `pe → PLAYER_EXPAND` (was `PLAY_END or PLAYER_ERROR`); `pc → PLAYER_COLLAPSE` (was `PLAYBACK_CHANGE`); `t → TIME_INTERVAL` (was `TIMEOUT or similar`); `c → CONTENT_ID` (was `CONTENT_ID_CHANGE`); `b → BACKGROUNDED_MODE` (was `BACKGROUNDED`).
+- `plan.md` Phase 1 — add a sub-task to drop `'ld'`/`'lh'` from `shaka.util.CmcdManager.StreamingFormat` and simplify `setLowLatency`'s `sf_` mutation. Phase 1 wire-format-change callout extends to cover both `nor` URL relativization and the LL value drop.
+- `plan.md` Phase 2 Task 2.3 (StreamingFormat re-export) — add a one-line note that after the Phase 1 LL drop, shaka's enum is a strict subset of CML's, so the alias re-export is straightforward.
+- `plan.md` Phase 3 Task 3.6 (player event listeners) — drop the `setLowLatency` → `update({streamingFormat: LOW_LATENCY_*})` step.
+- `plan.md` "Spec gaps surfaced during planning" gap #10 — update to reflect the actual finding (shaka emits non-spec values, CML is correct, drop in Phase 1).
 
 ### Update spec.md
-- `spec.md:299` (`applyResponseData` flow step 2) — clarify that `recordResponseReceived` takes `Partial<Cmcd>` and auto-derives `ttfb`/`ttlb`/`ts` from `response.resourceTiming`. The flat `{ttfb, ttlb, rc, url}` override path still works but is the secondary path; the primary path is to synthesize a `ResourceTiming` object on `response.resourceTiming` and let CML derive timing fields.
+- `spec.md:296-302` (`applyResponseData` flow step 2) — clarify that `recordResponseReceived` takes `Partial<Cmcd>` and auto-derives `ttfb`/`ttlb`/`ts` from `response.resourceTiming`. The flat `{ttfb, ttlb, rc, url}` override path still works but is the secondary path; the primary path is to synthesize a `ResourceTiming` object on `response.resourceTiming` and let CML derive timing fields.
 - `spec.md:346` — rename per-target `timeInterval` field to `interval` (matches CML's `CmcdEventReportConfig.ts:40`).
+- `spec.md:381-382` — drop both `setLowLatency(true) + DASH/HLS → update({streamingFormat: LOW_LATENCY_*})` rows from the "Player state ↔ reporter state mapping" table. Add a brief note that `sf` no longer reflects LL state in CMCD v2.
+- `spec.md:412` — update "Verified values match: `'d'`, `'ld'`, `'h'`, `'lh'`, `'s'`, `'o'`" to drop the LL variants and note shaka's non-spec values are dropped in Phase 1.
 - `spec.md:449` and `spec.md:511` — fix both references to `requester` as a "config field"; it's the `CmcdReporter` constructor's second positional arg, not a `CmcdReporterConfig` member.
 - `spec.md:469-475` (adapter requester sketch) — drop the Blob branch. CML's reporter only emits `body: string`; the Blob path is dead code.
 - `spec.md` Phase 3 section — add a note that sequence-number reset on `sid` change and the request-mode counter scope change (per-target-hash → global) are intentional alignment-with-CML wire changes, not regressions.
-
-**Once those land:** Re-pin to whatever CML version includes the LL streaming-format addition (likely `cmcd-v2.3.1` or `cmcd-v2.4.0`), update `cml-version.md`, and proceed to Phase 1.
