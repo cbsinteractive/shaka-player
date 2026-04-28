@@ -240,7 +240,7 @@ In severity order:
    - **Recommended action:** Update spec doc to say `interval` (or document the shaka-side `timeInterval` rename explicitly as a third experimental rename layered on the existing `enabledKeys → includeKeys` and `targets → eventTargets` renames). Implementation-wise, the adapter's `toReporterConfig_` already renames per-target fields, so this is mechanically trivial.
 
 3. **`recordResponseReceived` data shape is `Partial<Cmcd>`, not `{ttfb, ttlb, rc, url}`.** Spec implies a fixed shape; CML accepts any partial CMCD object. Auto-derived fields come from `response.resourceTiming`.
-   - **Spec assertion that fails:** Spec § "applyResponseData flow" step 2.
+   - **Spec assertion that fails:** `spec.md:299` ("Adapter calls `reporter.recordResponseReceived(response, {ttfb, ttlb, rc, url})`.").
    - **Recommended action:** Update spec to clarify the data param is `Partial<Cmcd>` and that the adapter has two valid paths (synthesize `resourceTiming` or pass overrides). No CML defect.
 
 4. **Sequence-number scope and reset semantics differ from shaka's existing behavior.** Detailed in Task 0.7. Wire-format change.
@@ -265,13 +265,16 @@ Minor: The spec § "Event-mode dispatch via NetworkingEngine" body-conversion co
 **Hold Phase 1 implementation until:**
 - A CML upstream PR adding `LOW_LATENCY_DASH` and `LOW_LATENCY_HLS` to `CmcdStreamingFormat` is merged and released (estimate: low effort given user maintains both repos).
 
-**Update spec.md immediately (no code impact):**
-- Replace `timeInterval` with `interval` in the per-target field shape table.
-- Update `plan.md:86` enum-name guesses (`pe → PLAYER_EXPAND`, `pc → PLAYER_COLLAPSE`, `t → TIME_INTERVAL`, `c → CONTENT_ID`, `b → BACKGROUNDED_MODE`).
-- Fix `spec.md:511` to call `requester` a constructor parameter, not a config field (matches the existing fix at `spec.md:449`).
-- Clarify `recordResponseReceived` data shape is `Partial<Cmcd>` and document the `resourceTiming` indirection.
-- Note `requester` is a constructor arg, not a config field.
-- Drop the Blob branch from the adapter requester sketch.
-- Add a note in the Phase 3 § that sequence-number reset on `sid` change and counter scope are intentional alignment-with-CML wire changes.
+**Doc-only updates (no code impact):**
+
+### Update plan.md
+- `plan.md:86` (Task 0.3 description) — replace the enum-name guesses with the correct CML constant names from Task 0.3's table above. Specifically: `pe → PLAYER_EXPAND` (was `PLAY_END or PLAYER_ERROR`); `pc → PLAYER_COLLAPSE` (was `PLAYBACK_CHANGE`); `t → TIME_INTERVAL` (was `TIMEOUT or similar`); `c → CONTENT_ID` (was `CONTENT_ID_CHANGE`); `b → BACKGROUNDED_MODE` (was `BACKGROUNDED`).
+
+### Update spec.md
+- `spec.md:299` (`applyResponseData` flow step 2) — clarify that `recordResponseReceived` takes `Partial<Cmcd>` and auto-derives `ttfb`/`ttlb`/`ts` from `response.resourceTiming`. The flat `{ttfb, ttlb, rc, url}` override path still works but is the secondary path; the primary path is to synthesize a `ResourceTiming` object on `response.resourceTiming` and let CML derive timing fields.
+- `spec.md:346` — rename per-target `timeInterval` field to `interval` (matches CML's `CmcdEventReportConfig.ts:40`).
+- `spec.md:449` and `spec.md:511` — fix both references to `requester` as a "config field"; it's the `CmcdReporter` constructor's second positional arg, not a `CmcdReporterConfig` member.
+- `spec.md:469-475` (adapter requester sketch) — drop the Blob branch. CML's reporter only emits `body: string`; the Blob path is dead code.
+- `spec.md` Phase 3 section — add a note that sequence-number reset on `sid` change and the request-mode counter scope change (per-target-hash → global) are intentional alignment-with-CML wire changes, not regressions.
 
 **Once those land:** Re-pin to whatever CML version includes the LL streaming-format addition (likely `cmcd-v2.3.1` or `cmcd-v2.4.0`), update `cml-version.md`, and proceed to Phase 1.
