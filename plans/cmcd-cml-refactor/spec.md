@@ -105,10 +105,11 @@ Three layers, each with one job:
 │   Thin shaka-specific adapter:                                 │
 │   - NetworkingEngine integration (applyRequestData /           │
 │     applyResponseData) — public method signatures unchanged    │
-│   - <video> + Player event listeners → reporter.update(...)    │
+│   - <video> + Player event listeners → reporter.update(...)   │
+│     and reporter.recordEvent(...) (with deduplication)         │
 │   - Maps shaka.extern.CmcdConfiguration → CmcdReporterConfig   │
 │   - Wires CmcdReporter's `requester` callback to               │
-│     NetworkingEngine for event-mode reports                    │
+│     NetworkingEngine for event-mode reports (POST + body)      │
 └────────────────────────────────────────────────────────────────┘
                               │
                               │ goog.require('cml.cmcd.*')
@@ -228,10 +229,20 @@ Target size: ~250 lines (down from 1704). Three responsibilities:
 ### 1. Lifecycle and player wiring
 
 - Construct `cml.cmcd.CmcdReporter` on first `configure(config)` call.
-- Tear down on `reset()`; null out the reporter; remove all event listeners.
-- Re-construct on subsequent `configure()` if config materially changed.
+  **Reporter is always-on**: even when no `eventTargets` are configured, the
+  reporter is the unified path for request-mode encoding (via
+  `createRequestReport`). When `eventTargets` are present, the same reporter
+  also batches and dispatches event-mode reports.
+- Call `reporter.start()` after construction to begin time-interval timers
+  for any configured event targets.
+- On `reset()`: call `reporter.stop(true)` (where `true` = flush pending
+  events before stopping), null out the reporter, remove all `<video>`
+  and player event listeners.
+- On `configure()` with materially-changed config: call `stop(true)` on
+  the old reporter, then construct + `start()` on a new one.
 - Subscribe to `<video>` events and `shaka.Player` events; translate state
-  changes to `reporter.update(...)` calls (see table below).
+  changes to `reporter.update(...)` and `reporter.recordEvent(...)` calls
+  (see table below).
 
 ### 2. Request/response interception
 
@@ -249,16 +260,45 @@ applyResponseData(type, response, context)
    - `bitrate` ← `segmentRef.variant.bandwidth`
    - `duration` ← `segmentRef.endTime - segmentRef.startTime`
    - `topBitrate` ← player ABR / variant constraints
-   - `rtp` ← `bitrate * config.rtpSafetyFactor` (computed in adapter, since CML's reporter doesn't know about a safety factor)
-2. Adapter calls `reporter.createRequestReport(objectType, {br, d, tb, rtp, ...})`.
-3. Reporter returns either `{headers: Record<string,string>}` or `{query: string}` depending on transmission mode.
-4. Adapter mutates `request.headers` / `request.uris[i]` in place.
+   - `rtp` ← `bitrate × config.rtpSafetyFactor` (computed in adapter; CML's
+     reporter doesn't know about a safety factor)
+2. Adapter constructs the CMCD data object, applying v2 encoding rules:
+   - **Inner-list keys** (`br`, `tb`, `bl`, `mtp`, `nor`) wrap their values
+     in single-element arrays when `version >= 2` per CMCD v2 Structured
+     Fields encoding: `data.br = [bitrate]`, `data.bl = [bufferLength]`,
+     `data.tb = [topBitrate]`, `data.mtp = [throughputKbps]`,
+     `data.nor = [nextUrl]`. For v1, these stay as scalars.
+   - **NaN guards**: `bl`, `tb`, `mtp` may be `NaN` early in playback
+     (buffer not yet established, no top variant chosen, throughput
+     estimator not seeded). Adapter checks `Number.isFinite(...)` before
+     including these keys; otherwise omits. Required to prevent Structured
+     Fields serialization errors in CML's encoder.
+3. Adapter calls `reporter.createRequestReport(request, data)`. CML returns
+   the original request augmented with applied CMCD encoding (CML signature:
+   `R & CmcdRequestReport<R['customData']>` — returns a new object derived
+   from the input, not in-place mutation).
+4. Adapter copies the CMCD-applied fields (`uris`, `headers`) from CML's
+   returned report back onto shaka's `request` object — preserving shaka's
+   existing in-place-mutation contract for `applyRequestData` callers.
+
+`v=1` field is omitted from CMCD output per spec (v1 is the default
+interpretation if `v` is absent). CML's encoders handle this internally;
+adapter does not need to filter explicitly.
+
+`nor` (next object request) URL relativization is a **deliberate
+behavioral change**: shaka's existing `urlToRelativePath` produced
+**path-relative** URLs; CML uses `url.origin` as `baseUrl` to produce
+**root-relative** URLs. This aligns shaka's output with CML's
+spec-conformant behavior. Flag this in the Phase 1 PR description as an
+intentional wire-format change (consumers parsing `nor` server-side may
+need to adjust path-resolution logic).
 
 `applyResponseData` flow:
 
 1. Adapter measures `ttfb`/`ttlb` via existing `requestTimestampMap_` mechanism.
-2. Adapter calls `reporter.recordResponseReceived(requestId, {ttfb, ttlb, rc, url})`.
-3. Reporter buffers response data for the next emission opportunity.
+2. Adapter calls `reporter.recordResponseReceived(response, {ttfb, ttlb, rc, url})`.
+3. Reporter buffers response data for the next emission opportunity (and
+   internally fires the v2 `rr` "response received" event when configured).
 
 The shaka-specific extraction helpers
 (`getObjectType_`, `getBitrate_`, `getDuration_`, `getTopBitrate_`,
@@ -296,21 +336,71 @@ The experimental flag on shaka's CMCD v2 config (see
 [`externs/shaka/player.js:2810-2818`](externs/shaka/player.js)) authorizes
 these renames. v1 fields keep their existing names.
 
+**Per-target `eventTargets[]` field shape.** Each entry in `eventTargets`
+configures one event-reporting endpoint. Shape (post-rename):
+
+| Per-target field | Type | Purpose |
+|---|---|---|
+| `url` | `string` | Endpoint URL for CMCD event reports |
+| `events` | `Array<CmcdEventType>` | Which events trigger reports (e.g., `[PLAY_STATE, ERROR, RESPONSE_RECEIVED]`); empty / undefined = none |
+| `timeInterval` | `number` *(seconds)* | Periodic time-interval reports (`0` disables; CML default per `CMCD_DEFAULT_TIME_INTERVAL`) |
+| `batchSize` | `number` | Number of events to batch before dispatch (default `1` = no batching) |
+| `includeKeys` | `Array<CmcdKey>` *(was `enabledKeys`)* | Subset of CMCD keys to include in this target's reports |
+| `version` | `1 \| 2` | Per-target version override; defaults to top-level `version` |
+
+Shaka maps to CML's `CmcdEventReportConfig` shape:
+`Omit<CmcdEventReportConfig, 'enabledKeys'> & {includeKeys?: CmcdKey[]}`,
+matching hls.js PR #7725's pattern. The adapter renames `includeKeys` →
+`enabledKeys` per-entry when constructing the reporter config.
+
+Update [`externs/shaka/player.js`](externs/shaka/player.js)
+`shaka.extern.CmcdTarget` typedef to reflect this shape; existing fields
+in the typedef (e.g., `events`, `timeInterval`) stay; renamed field is
+`enabledKeys` → `includeKeys`.
+
 ### Player state ↔ reporter state mapping
 
-All state mutation goes through `reporter.update(partialState)`:
+State mutation and event emission use **two distinct reporter methods**:
 
-| shaka event/signal | reporter call |
+- `reporter.update(partialState)` — mutates persistent state; the next
+  emitted payload reflects the change.
+- `reporter.recordEvent(eventType, data)` — emits a discrete v2 event.
+
+Many state transitions require **both**: `update()` to persist the new
+state, then `recordEvent()` to emit a v2 event noting the transition.
+
+| shaka event/signal | reporter calls |
 |---|---|
-| Buffering becomes true | `reporter.update({playerState: REBUFFERING})` |
-| Buffering becomes false | `reporter.update({playerState: PLAYING})` |
-| `setLowLatency(true)` + DASH | `reporter.update({streamingFormat: LOW_LATENCY_DASH})` |
-| `setLowLatency(true)` + HLS | `reporter.update({streamingFormat: LOW_LATENCY_HLS})` |
-| Pause | `reporter.update({playerState: PAUSED})` |
-| Content ID changes | `reporter.update({cid: newId})` |
-| Visibility change → backgrounded | `reporter.update({backgrounded: true})` |
-| Mute / unmute | `reporter.update({muted: true/false})` |
-| Throughput estimate update | `reporter.update({mtp: bandwidthKbps})` |
+| Buffering becomes true | `update({playerState: REBUFFERING})` + `recordEvent(PLAY_STATE)` |
+| Buffering becomes false | `update({playerState: PLAYING})` + `recordEvent(PLAY_STATE)` |
+| Pause | `update({playerState: PAUSED})` + `recordEvent(PLAY_STATE)` |
+| Seeking | `update({playerState: SEEKING})` + `recordEvent(PLAY_STATE)` |
+| Ended | `update({playerState: ENDED})` + `recordEvent(PLAY_STATE)` |
+| Fatal error | `update({playerState: FATAL_ERROR})` + `recordEvent(ERROR)` |
+| Variant switch (bitrate change) | `update({br: [newBitrate]})` + `recordEvent(BITRATE_CHANGE)` |
+| `setLowLatency(true)` + DASH | `update({streamingFormat: LOW_LATENCY_DASH})` |
+| `setLowLatency(true)` + HLS | `update({streamingFormat: LOW_LATENCY_HLS})` |
+| Content ID changes | `update({cid: newId})` (CML emits the v2 `c` event internally) |
+| Visibility → backgrounded | `update({backgrounded: bool})` (CML emits the v2 `b` event internally) |
+| Mute | `update({muted: true})` + `recordEvent(MUTE)` |
+| Unmute | `update({muted: false})` + `recordEvent(UNMUTE)` |
+| Throughput estimate update | `update({mtp: [bandwidthKbps]})` |
+
+**Player-state deduplication.** Adapter tracks the last-emitted
+`playerState` and skips both `update` and `recordEvent` when the new state
+matches. Without this, `<video>` event listeners can fire repeatedly on
+stable states (e.g., `playing` after every minor stall), spamming the
+reporter and downstream targets:
+
+```js
+// in CmcdManager
+setPlayerState_(state) {
+  if (this.lastPlayerState_ === state) return;
+  this.lastPlayerState_ = state;
+  this.reporter_.update({playerState: state});
+  this.reporter_.recordEvent(cml.cmcd.CmcdEventType.PLAY_STATE);
+}
+```
 
 MSD is computed internally by `CmcdReporter`; the adapter does not feed it.
 
@@ -325,30 +415,73 @@ MSD is computed internally by `CmcdReporter`; the adapter does not feed it.
 - **`externs/cmcd.js`** (`CmcdData` typedef): kept as the public-facing typedef
   shape. Internally, the adapter and vendored port use `cml.cmcd.CmcdData`.
   The two are structurally equivalent.
-- **`shaka.extern.CmcdConfiguration`** typedef: keeps `targets` field name
-  changed to `eventTargets`; `shaka.extern.CmcdTarget` typedef gets
-  `enabledKeys` → `includeKeys` rename. Both are experimental-flagged so
-  breaking change is acceptable.
+- **`shaka.extern.CmcdConfiguration`** typedef: `targets` field renamed to
+  `eventTargets`; `shaka.extern.CmcdTarget` typedef gets `enabledKeys` →
+  `includeKeys` rename. Both are experimental-flagged so breaking change
+  is acceptable.
+
+**New public re-exports for v2 configuration.** Shaka users configuring
+`eventTargets[].events` need access to the `CmcdEventType` enum (otherwise
+they'd have to hardcode magic strings like `'ps'`, `'e'`, `'rr'`). Minimum
+re-exports added to the existing `shaka.util.CmcdManager` class scope (no
+new namespace; consistent with where `StreamingFormat` already lives):
+
+| Re-exported symbol | From CML | Purpose |
+|---|---|---|
+| `shaka.util.CmcdManager.EventType` | `cml.cmcd.CmcdEventType` | Configure `eventTargets[].events` |
+| `shaka.util.CmcdManager.PlayerState` | `cml.cmcd.CmcdPlayerState` | Reading player-state field externally |
+
+Both are `@export`ed string-enum aliases of CML symbols (string values
+identical, names match). Existing
+`shaka.util.CmcdManager.StreamingFormat` stays where it is for back-compat.
+
+Other CML enums and constants (`CmcdObjectType`, `CmcdStreamType`,
+`CmcdHeaderField`, `CMCD_V1`, `CMCD_V2`, key arrays) stay internal under
+`cml.cmcd.*` until users have a documented need; shaka maintainers may
+expand the re-export surface in follow-up PRs based on user feedback. This
+is a more conservative public-API expansion than hls.js's
+`exports-named.ts` re-exports — appropriate for shaka's generally
+conservative API surface.
 
 ### Event-mode dispatch via NetworkingEngine
 
 `CmcdReporter` accepts a `requester: (req) => Promise<{status: number}>`
-config option for dispatching event-mode reports. The shaka adapter wires this
-to `NetworkingEngine` rather than raw `fetch`:
+config option for dispatching event-mode reports. **Event-mode transport is
+HTTP POST with a body** — CML constructs each event request as
+`method: 'POST'` with the encoded CMCD payload in the body (per dash.js
+PR #4816's `Constants.CMCD_MODE_BODY` precedent and CML's reporter source).
+This is distinct from request-mode encoding (which mutates an existing
+request's URL or headers); event mode emits new requests to dedicated
+event-target URLs.
+
+Shaka adapter wires `requester` to `NetworkingEngine` rather than raw `fetch`:
 
 ```js
-const requester = (cmcdReq) => {
+const requester = async (cmcdReq) => {
   const retryParams = shaka.net.NetworkingEngine.defaultRetryParameters();
   const shakaReq = shaka.net.NetworkingEngine.makeRequest(
       [cmcdReq.url], retryParams);
-  shakaReq.method = cmcdReq.method || 'GET';
+  shakaReq.method = cmcdReq.method || 'POST';
   shakaReq.headers = cmcdReq.headers || {};
-  shakaReq.body = cmcdReq.body;
-  return this.networkingEngine_
-      .request(RequestType.TIMING, shakaReq, {type: 'cmcd-event'})
-      .promise
-      .then((response) => ({status: 200}))
-      .catch((err) => ({status: err.status || 0}));
+
+  // CML may emit body as string (structured-fields) or Blob (JSON).
+  // shaka.extern.Request.body expects BufferSource; convert:
+  if (typeof cmcdReq.body === 'string') {
+    shakaReq.body = shaka.util.StringUtils.toUTF8(cmcdReq.body);
+  } else if (cmcdReq.body instanceof Blob) {
+    shakaReq.body = await cmcdReq.body.arrayBuffer();
+  } else {
+    shakaReq.body = cmcdReq.body;  // already BufferSource
+  }
+
+  try {
+    await this.networkingEngine_
+        .request(RequestType.TIMING, shakaReq, {type: 'cmcd-event'})
+        .promise;
+    return {status: 200};
+  } catch (err) {
+    return {status: err.status || 0};
+  }
 };
 ```
 
@@ -358,8 +491,9 @@ manifests and segments. **No new public config field needed** (vs. hls.js's
 `loader` field): users already control transport via NetworkingEngine plugins.
 
 `RequestType.TIMING` is the existing "non-content network operation" bucket.
-Could later become a dedicated `CMCD_EVENT_REPORT` request type if maintainers
-want one; defer that decision until needed.
+Dash.js introduced a dedicated `HTTPRequest.CMCD_EVENT` type for similar
+purposes. Shaka can later add `RequestType.CMCD_EVENT_REPORT` in a follow-up
+PR without changing the adapter contract; defer until maintainers decide.
 
 ## CML-side requirements (verify before/during Phase 3)
 
@@ -369,11 +503,13 @@ upstream in CML if missing.
 
 | Need | Status |
 |---|---|
+| `reporter.start()` / `reporter.stop(flush)` / `reporter.flush()` lifecycle | confirmed (per CML source inspection) |
 | `reporter.update(partialState)` for state mutation | confirmed |
-| `reporter.createRequestReport(objectType, data)` returning headers/query | confirmed (per hls.js PR #7725) |
-| `reporter.recordResponseReceived(requestId, {ttfb, ttlb, rc, url, ...})` | confirmed |
-| `requester` config field for event-mode dispatch | confirmed (per CML source) |
-| Built-in time-interval event timer | likely present; verify reporter owns it (shaka stops running its own) |
+| `reporter.recordEvent(eventType, data)` for discrete event emission | confirmed |
+| `reporter.createRequestReport(request, data)` for request-mode encoding | confirmed (CML signature: `R & CmcdRequestReport<R['customData']>`) |
+| `reporter.recordResponseReceived(response, data)` | confirmed |
+| `requester` config field for event-mode dispatch | confirmed (CML constructs `method: 'POST'` with body) |
+| Built-in time-interval event timer | confirmed (reporter owns; shaka stops running its own) |
 | MSD computed internally by reporter | confirmed |
 | Sequence numbers per-target | likely present; verify per v2 spec |
 
@@ -412,10 +548,13 @@ behavior-preserving except where explicitly noted.
   static methods in [`cmcd_manager.js`](lib/util/cmcd_manager.js) to delegate
   to `cml.cmcd.encodeCmcd` / `cml.cmcd.appendCmcdQuery` /
   `cml.cmcd.appendCmcdHeaders`.
-- **No behavior change.** Same wire output. State machine, sequence numbers,
-  event timing, public API all unchanged.
+- **Near-no behavior change.** State machine, sequence numbers, event
+  timing, public API all unchanged. **One known intentional wire-format
+  change**: `nor` URLs become root-relative (CML's spec-conformant
+  behavior) rather than path-relative. Document in PR description.
 - Tests in [`cmcd_manager_unit.js`](test/util/cmcd_manager_unit.js) mostly
-  unchanged — they assert wire output, which stays identical.
+  unchanged — `nor` assertions update to root-relative; other wire-output
+  assertions stay identical (verify via diff testing).
 - **Approximate diff size**: +3000 lines (vendored port), ~500 lines
   changed in `cmcd_manager.js`.
 
@@ -449,6 +588,14 @@ behavior-preserving except where explicitly noted.
 - Apply config renames in [`externs/shaka/player.js`](externs/shaka/player.js):
   - `shaka.extern.CmcdConfiguration.targets` → `eventTargets`
   - `shaka.extern.CmcdTarget.enabledKeys` → `includeKeys`
+- Add v2 re-exports: `shaka.util.CmcdManager.EventType` (alias of
+  `cml.cmcd.CmcdEventType`), `shaka.util.CmcdManager.PlayerState` (alias of
+  `cml.cmcd.CmcdPlayerState`).
+- Update [`demo/`](demo/) to add a CMCD v2 configuration UI (transmission
+  mode picker, version selector, eventTarget editor). Mirrors the
+  precedent set by dash.js's `samples/cmcd/cmcd-v2.html` and
+  `cmcd-v2-network-interceptors.html`. Lets users validate v2 config in
+  the demo without writing code.
 - Test rewrite (see Tests section): delete CMCD wire-format tests (~3000+
   lines); add ~500 lines of integration tests focused on shaka-specific
   glue. Add ~100 lines of end-to-end smoke tests.
@@ -540,16 +687,17 @@ shaka-event-translation are shaka's concern. Clear ownership boundary.
   requirements table need a precursor pass against current CML source before
   Phase 3 starts. Any gaps fill upstream.
 - **Phase 1 byte-level output equivalence.** Phase 1 routes encoding through
-  CML and is described as behavior-preserving. This rests on CML's
-  encoders producing byte-identical output to shaka's existing
-  `serialize`/`toQuery`/`appendQueryToUri` code (key ordering, escaping,
-  formatting). If Phase 1 surfaces output differences, the PR narrative
-  changes from "no behavior change" to "intentional alignment with CML's
-  spec-conformant output," which shaka maintainers will scrutinize more
-  carefully. Verify with diff testing during Phase 1 implementation; if
-  divergences exist, document them and decide per case whether to (a)
-  accept as a spec-conformance fix, (b) work around in the adapter, or
-  (c) align CML and shaka via an upstream CML PR.
+  CML and is described as behavior-preserving. **One known intentional
+  divergence**: `nor` URLs change from path-relative (shaka's
+  `urlToRelativePath`) to root-relative (CML's `url.origin` baseUrl). Other
+  potential divergences (key ordering, escaping, formatting) are unknown;
+  verify with diff testing during Phase 1 implementation. The Phase 1 PR
+  description should reframe from "no behavior change" to "alignment with
+  CML's spec-conformant output, with `nor` URL relativization as the one
+  known intentional change." If diff testing surfaces additional
+  divergences, decide per case whether to (a) accept as a spec-conformance
+  fix, (b) work around in the adapter, or (c) align CML and shaka via an
+  upstream CML PR.
 - **Pinned CML version.** Spec assumes `@svta/cml-cmcd` v2.3.0 (current
   latest). If a newer version ships before Phase 1 lands, pin to whatever's
   current at port time and note in `SUMMARY.txt`.
