@@ -5,8 +5,6 @@
 
 goog.provide('cml.cmcd.CmcdEvent');
 
-goog.require('cml.cmcd.CmcdRequest');
-
 
 /**
  * Common Media Client Data (CMCD) version 2 - Event Mode.
@@ -17,6 +15,13 @@ goog.require('cml.cmcd.CmcdRequest');
  * Upstream CML expresses this as `CmcdRequest & {event keys...}`.
  * Closure typedefs cannot express type intersection; we list the union
  * of all properties (request + event) directly. All members optional.
+ *
+ * The string-literal types for `e`, `ot`, `sf`, `sta`, `st` are the
+ * `cml.cmcd.CmcdEventType`, `cml.cmcd.CmcdObjectType`,
+ * `cml.cmcd.CmcdStreamingFormat`, `cml.cmcd.CmcdPlayerState`,
+ * `cml.cmcd.CmcdStreamType` enum value unions. We use plain `string`
+ * here to keep the typedef self-contained and avoid circular
+ * `goog.require` between enum files and this typedef.
  *
  * @see {@link https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html#event-mode}
  *

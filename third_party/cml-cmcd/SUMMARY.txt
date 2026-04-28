@@ -20,3 +20,6 @@ cml-cmcd
     - Validators (validateCmcd*, isCmcd*) omitted: tooling-only utilities
     - cml-utils dep removed: shaka adapter always sets `sid` explicitly;
       a 5-line cml_utils.js shim provides `uuid` for any dead default paths
+    - Filenames disambiguated with `_const` suffix where TS files differ
+      only in case (e.g., `CmcdV1.ts` typedef + `CMCD_V1.ts` numeric const
+      → `cmcd_v1.js` + `cmcd_v1_const.js`). Affects v1, v2, and HEADER_MAP.

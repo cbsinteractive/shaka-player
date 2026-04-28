@@ -5,10 +5,6 @@
 
 goog.provide('cml.cmcd.Cmcd');
 
-goog.require('cml.cmcd.CmcdEvent');
-goog.require('cml.cmcd.CmcdRequest');
-goog.require('cml.cmcd.CmcdResponse');
-
 
 /**
  * Common Media Client Data (CMCD) version 2.
@@ -21,6 +17,13 @@ goog.require('cml.cmcd.CmcdResponse');
  * extends `CmcdRequest`) plus event-only fields from `CmcdEvent`.
  * Callers should treat `cml.cmcd.Cmcd` as having any field that any
  * of the three modes defines. All members optional.
+ *
+ * The string-literal types for `e`, `ot`, `sf`, `sta`, `st` are the
+ * `cml.cmcd.CmcdEventType`, `cml.cmcd.CmcdObjectType`,
+ * `cml.cmcd.CmcdStreamingFormat`, `cml.cmcd.CmcdPlayerState`,
+ * `cml.cmcd.CmcdStreamType` enum value unions. We use plain `string`
+ * here to keep the typedef self-contained and avoid circular
+ * `goog.require` between enum files and this typedef.
  *
  * @see {@link https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf}
  *

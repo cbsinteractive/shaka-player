@@ -5,8 +5,6 @@
 
 goog.provide('cml.cmcd.CmcdResponse');
 
-goog.require('cml.cmcd.CmcdRequest');
-
 
 /**
  * Common Media Client Data (CMCD) version 2 - Response Mode.
@@ -19,6 +17,12 @@ goog.require('cml.cmcd.CmcdRequest');
  * Upstream CML expresses this as `CmcdRequest & {response keys...}`.
  * Closure typedefs cannot express type intersection; we list the union
  * of all properties (request + response) directly. All members optional.
+ *
+ * The string-literal types for `ot`, `sf`, `sta`, `st` are the
+ * `cml.cmcd.CmcdObjectType`, `cml.cmcd.CmcdStreamingFormat`,
+ * `cml.cmcd.CmcdPlayerState`, `cml.cmcd.CmcdStreamType` enum value
+ * unions. We use plain `string` here to keep the typedef self-contained
+ * and avoid circular `goog.require` between enum files and this typedef.
  *
  * @see {@link https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html#response-mode}
  *
