@@ -24,7 +24,7 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
 | **Phase 1C** — `CmcdReporter` + 5 deferred typedefs (Task 1.8) | ✅ Complete | 3 commits, ending at `d682bb1bb`. 6 new files. The vendored port is now structurally complete. |
 | **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ✅ Complete | 2 commits, ending at `adfdfab05`. Net −168 LoC across `lib/util/cmcd_manager.js` and `test/util/cmcd_manager_unit.js`. `python3 build/check.py` exits 0. `build/test.py` deferred to sub-phase E (Tasks 1.11-1.12 catalog and update wire-format-divergence assertions). |
 | **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ✅ Complete | 2 commits ending at `b94f7ebca`. Started at 52 of 124 CMCD tests failing post-1.10; ended at 0 fail / 124 pass. Three (c)-class adapter bugs fixed in `27cd16907`; ~80 (a)/(b)-class assertion updates in `b94f7ebca`. Full `--quick` suite: 2995/2995 pass. |
-| **Phase 1F** — Demo verification + Phase 1 PR (Tasks 1.13-1.14) | ⏳ **Resume here.** | Phase 1 ships as PR after this. |
+| **Phase 1F** — Demo verification (Task 1.13) | ✅ Complete | Smoke-test on `bbb-dark-truths/dash.mpd` via Claude Preview-driven `python3 -m http.server`. Query mode (15 segment requests captured): `?CMCD=…cid="smoke-test",ot=m,sf=d,sid="…",sn=N,su,v=2` — `v=2` always present, `ts` absent in request mode, `sf=d` (no `'ld'`), `ot`/`sf`/`st` as tokens. Header mode (15 requests captured via request filter; CMCD-* stripped before fetch to avoid CORS preflight): `v=2` only in `CMCD-Session` shard (not in `CMCD-Object`/`Request`/`Status`); request shard contains `sn`/`mtp`/`su` only — no `ts`. Zero JS console errors. Per-phase PR (Task 1.14) deferred to single all-phases PR per user direction. |
 | **Phase 2** — Adopt CML constants, dedupe shaka duplicates | ⏳ Not started | After Phase 1 merges. |
 | **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ Not started | After Phase 2 merges. |
 
@@ -59,6 +59,36 @@ E. **Event-mode `nor` stays absolute.** When the collector URL is at a different
 
 **Resolved (c)-class bug summary for the Phase 1 PR description:** the three adapter fixes (`reportingMode` threading, prepare-once header encoding, `version` threading) are the load-bearing parts of sub-phase E. The (a)/(b) test updates document the spec-conformance and SFV-encoding alignments that drove ~80 assertion changes.
 
+### Sub-phase F landing notes (Task 1.13)
+
+End-to-end smoke test on `bbb-dark-truths/dash.mpd` (DASH, multi-period, no DRM) via Claude Preview-driven `python3 -m http.server` of the demo dir.
+
+**Query mode** (`useHeaders: false`, V2): 15 segment + manifest requests captured. Decoded sample:
+```
+?CMCD=cid="smoke-test",ot=m,sf=d,sid="…",sn=1,su,v=2
+?CMCD=bl=9900,br=3082,cid="smoke-test",d=4000,dl=9900,mtp=19900,ot=v,rtp=6200,sf=d,sid="…",sn=14,st=v,tb=3082,v=2
+```
+- `v=2` present in every request ✓
+- `ts=` absent in every request ✓ (V2 request-mode filter)
+- `sf=d` for DASH ✓ (no `'ld'`)
+- `ot=m`, `ot=v`, `ot=a`, `ot=i`, `sf=d`, `st=v` all rendered as bare tokens ✓
+- `cid="smoke-test"`, `sid="…"` rendered as quoted strings ✓ (string-typed fields)
+- `su` rendered as bare token (boolean true) ✓
+
+**Header mode** (`useHeaders: true`, V2): 15 segment + manifest requests captured via `registerRequestFilter` (CMCD-* stripped before fetch to avoid CORS preflight on the cross-origin asset). Decoded sample:
+```
+CMCD-Object:  ot=m
+CMCD-Request: mtp=26100,sn=1,su
+CMCD-Session: cid="smoke-test-headers",sf=d,sid="…",v=2
+```
+- `v=2` only in `CMCD-Session` shard ✓ — never in Object / Request / Status (sub-phase E C2 fix verified end-to-end)
+- `ts=` absent from Request shard ✓
+- All four shards correctly populated when keys exist; empty shards correctly absent (e.g. `CMCD-Status` only emitted when `bs`/`bg` etc. are set)
+
+**Console**: zero errors during full demo session.
+
+**Sub-phase F caveat**: cross-origin storage.googleapis.com blocks CMCD-* request headers via CORS preflight. This is browser-spec behavior, not a shaka bug — typical CMCD deployments target the user's own CDN where preflight is configured to allow `Access-Control-Allow-Headers: CMCD-*`. The smoke test stripped CMCD-* in the request filter so the underlying segment fetch could complete; the encoder produced correct headers either way (verified at the filter checkpoint).
+
 ### Key architectural decisions in the port — surface in Phase 1 PR description
 
 These were judgment calls during sub-phases B+C; maintainers should weigh in before merge:
@@ -73,11 +103,11 @@ Two git stashes exist:
 - `stash@{0}: On feat/cmcd-cml-refactor: accidental-stash-pop-recovery` — created during a sub-phase B subagent's `git stash pop` mishap. Contains contaminated working state from that incident.
 - `stash@{1}: On task/revert-cmcd-v1: CMCD STUFF` — pre-existing user stash. Preserved.
 
-### Resuming work in a new session — sub-phase F prep
+### Resuming work in a new session — Phase 2 prep
 
-- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as sub-phase D/E prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
-- **Sub-phase F scope (Tasks 1.13-1.14):** smoke-test the demo with CMCD enabled in both transmission modes, then open the Phase 1 PR. The smoke test verifies the wire-format changes against a real player flow (the test suite verifies them in isolation).
-- **Phase 1 PR description scaffolding** is in this plan — see "Sub-phase D landing notes", "Sub-phase E landing notes", and "Key architectural decisions in the port". Three intentional wire-format changes summarized: (1) `nor` URLs root-relative; (2) `'ld'`/`'lh'` `StreamingFormat` dropped; (3) V2 SFV encoding (token vs string for `e`/`sta`, `v=2` always present, `nor` inner-list).
+- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as sub-phase D/E/F prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
+- **Phase 2 scope (Tasks 2.1-2.6):** map shaka's `ObjectType`, `Version`, `StreamType`, `StreamingFormat`, `CmcdMode`, `Player.State` enums to CML equivalents; replace internal references; re-export `StreamingFormat` as a shaka alias of `cml.cmcd.CmcdStreamingFormat` for back-compat; delete the duplicate definitions. **Phase 2 is pure dedupe** — no behavioral change beyond what Phase 1 already shipped. Test suite should stay at 0 fail throughout.
+- **Phase 1 PR description scaffolding** lives at `plans/cmcd-cml-refactor/phase-1-pr-draft.md` (uncommitted scratch file). Phase 2 + 3 will accrete to the same file or be merged into one before the eventual all-phases PR.
 
 ---
 
@@ -88,7 +118,7 @@ Two git stashes exist:
 - **Phase 2** — Replace shaka's duplicate constants/enums with CML's; pure dedupe.
 - **Phase 3** — Rewrite `cmcd_manager.js` as adapter around `CmcdReporter`; delete state machine; rewrite tests; update demo and externs.
 
-Each phase ships as one PR. Phases 1 and 2 are behavior-preserving (modulo the documented `nor` change); Phase 3 is the behavioral rewrite and carries the migration risk.
+**PR strategy (revised 2026-04-28):** all three phases ship together as a single PR off `feat/cmcd-cml-refactor` once the whole refactor is complete. The original plan called for one PR per phase; the user revised this to reduce review-cycle overhead. Phase 1 / 2 / 3 sub-phase boundaries still gate work internally (build/check.py + test.py must pass at each sub-phase end), but `git push` + PR creation only happens after Phase 3 lands. Per-phase Task X.14 "open PR" steps below are no longer applicable — treat them as scaffolding for the eventual single PR's description (already drafted at `plans/cmcd-cml-refactor/phase-1-pr-draft.md`; Phase 2 / 3 draft sections will accrete to the same file or be merged into one).
 
 ## Spec gaps surfaced during planning
 
