@@ -216,6 +216,18 @@ describe('CmcdManager Setup', () => {
     const NetworkingEngine = shaka.net.NetworkingEngine;
     const RequestType = NetworkingEngine.RequestType;
 
+    describe('StreamingFormat alias', () => {
+      it('preserves value-identity with cml.cmcd.CmcdStreamingFormat', () => {
+        // Phase 2 retains a literal `@enum` definition rather than a
+        // direct alias (Closure tooling — clutz + generateExterns —
+        // both expect inline `ObjectExpression` for `@export`ed
+        // enums). The values must stay in lockstep with CML.
+        expect(CmcdManager.StreamingFormat).toEqual(
+            /** @type {!Object<string, string>} */ (
+              cml.cmcd.CmcdStreamingFormat));
+      });
+    });
+
     describe('Query serialization', () => {
       it('produces correctly serialized data', () => {
         const query = CmcdManager.toQuery(data);
