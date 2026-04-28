@@ -179,6 +179,7 @@
 +../../third_party/cml-cmcd/cmcd_v2_const.js
 +../../third_party/cml-cmcd/cmcd_value.js
 +../../third_party/cml-cmcd/cmcd_version.js
++../../third_party/cml-cmcd/cml_sfv.js
 +../../third_party/cml-cmcd/cml_utils.js
 
 +../../third_party/language-mapping-list/language-mapping-list.js
