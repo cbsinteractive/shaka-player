@@ -23,8 +23,8 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
 | **Phase 1B** — Encoders + helpers + cml-utils/sfv shims + deferred `CMCD_FORMATTER_MAP` (Tasks 1.6-1.7) | ✅ Complete | 5 commits, ending at `9bcf6614e`. 23 new files. Re-included 8 spec-excluded files (predicates + `is_valid.js` + `group_cmcd_headers.js`) that were genuinely runtime-required by encoders. New shim `cml_sfv.js` (~448 LoC, RFC 8941 §4.1 serializer). |
 | **Phase 1C** — `CmcdReporter` + 5 deferred typedefs (Task 1.8) | ✅ Complete | 3 commits, ending at `d682bb1bb`. 6 new files. The vendored port is now structurally complete. |
 | **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ✅ Complete | 2 commits, ending at `adfdfab05`. Net −168 LoC across `lib/util/cmcd_manager.js` and `test/util/cmcd_manager_unit.js`. `python3 build/check.py` exits 0. `build/test.py` deferred to sub-phase E (Tasks 1.11-1.12 catalog and update wire-format-divergence assertions). |
-| **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ⏳ **Resume here.** | Needs human judgment on divergence classification. |
-| **Phase 1F** — Demo verification + Phase 1 PR (Tasks 1.13-1.14) | ⏳ Not started | Phase 1 ships as PR after this. |
+| **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ✅ Complete | 2 commits ending at `b94f7ebca`. Started at 52 of 124 CMCD tests failing post-1.10; ended at 0 fail / 124 pass. Three (c)-class adapter bugs fixed in `27cd16907`; ~80 (a)/(b)-class assertion updates in `b94f7ebca`. Full `--quick` suite: 2995/2995 pass. |
+| **Phase 1F** — Demo verification + Phase 1 PR (Tasks 1.13-1.14) | ⏳ **Resume here.** | Phase 1 ships as PR after this. |
 | **Phase 2** — Adopt CML constants, dedupe shaka duplicates | ⏳ Not started | After Phase 1 merges. |
 | **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ Not started | After Phase 2 merges. |
 
@@ -38,6 +38,26 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
   1. `nor` URLs become root-relative instead of path-relative (matching CTA-5004-B + CML's spec-conformant output).
   2. `'ld'` / `'lh'` `StreamingFormat` values dropped — LL DASH now emits `sf=d`, LL HLS now emits `sf=h`. `setLowLatency` no longer mutates `sf_`; `getStreamFormat_` no longer branches on `lowLatency_`.
 - **No tests asserted `sf=ld`/`sf=lh`** (verified via repo-wide grep). The `urlToRelativePath` describe-block (9 tests) was the only test deletion in sub-phase D.
+
+### Sub-phase E landing notes (Tasks 1.11 + 1.12)
+
+Sub-phase E classified the diff between pre-delegation and post-delegation wire output by running the existing test suite at HEAD-after-1.10 — failures themselves served as the diff. 52 of 124 CMCD tests failed initially; 0 fail after sub-phase E.
+
+**Three (c)-class adapter bugs fixed in `27cd16907`:**
+
+1. **C1** — Event-mode encoded output dropped event-only keys (`e`, `ts`, `cen`). `cml.cmcd.prepareCmcdData` defaults `reportingMode` to request mode when not specified, and the request-mode filter excludes event-only keys. Threaded `reportingMode` through `getEncodeOptions_`: `CMCD_EVENT_MODE` for `sendCmcdRequest_` (the out-of-band event/response-received path), `CMCD_REQUEST_MODE` for `applyCmcdDataToRequest_` / `appendSrcData` / `appendTextTrackData`. `sendCmcdRequest_` also stops passing `baseURL`: target collector URLs are typically a different origin from segment URLs, so `baseUrl`-based `nor` rewriting is meaningless there.
+2. **C2** — `toHeaders` emitted `v=2` in every shard. shaka's old serialize-per-shard pattern, once delegated, ran `prepareCmcdData` per shard and got `v=2` auto-added each time. Restructured `toHeaders` to call `prepareCmcdData` once on the full data, bucket the prepared keys into shaka's existing `headerMap`, and call `encodePreparedCmcd` per shard so re-preparation is skipped.
+3. **C3** — V1 configurations were getting V2 filter behavior because `prepareCmcdData` defaults to V2. Tests with V1-only keys (e.g. `nrr`) saw them filtered out. Threaded `this.config_.version` through `getEncodeOptions_`.
+
+**Five (a)/(b)-class wire-format alignments shipped in `b94f7ebca`** (test assertions updated; no code change):
+
+A. **`nor` URLs root-relative + V2 inner-list format.** Already shipped in sub-phase D Task 1.10. CML emits `nor=("path")` (V2 inner-list) instead of `nor="path"` (V1 string).
+B. **`v=2` auto-added in V2 output.** Per CTA-5004-B § 4.1, V2 output MUST include `v`. CML's `prepareCmcdData` enforces this even when the user filters `v` out via `includeKeys`. Old shaka emitted `v` only when explicitly present in `data`. Tests that previously asserted `not.toContain('v=2')` now assert `toContain('v=2')`; tests with no `v` in input now expect `,v=2` in output.
+C. **`ts` no longer in request-mode output.** Old shaka emitted `ts=<timestamp>` in request-mode CMCD; per CTA-5004-B `ts` is event-mode only. CML's request-mode filter correctly drops it. Inverted "includes ts for segment requests" to "does not include ts".
+D. **Token vs string formatting** for `e` and `sta` values (~73 sites). Old shaka quoted them as strings (`e="ps"`, `sta="s"`); CML emits them as RFC 8941 SFV tokens (`e=ps`, `sta=s`) per spec.
+E. **Event-mode `nor` stays absolute.** When the collector URL is at a different origin from the segment URL, CML doesn't relativize `nor` (no `baseUrl` in event mode). Tests expecting path-relative event-mode `nor` updated to expect the absolute URL.
+
+**Resolved (c)-class bug summary for the Phase 1 PR description:** the three adapter fixes (`reportingMode` threading, prepare-once header encoding, `version` threading) are the load-bearing parts of sub-phase E. The (a)/(b) test updates document the spec-conformance and SFV-encoding alignments that drove ~80 assertion changes.
 
 ### Key architectural decisions in the port — surface in Phase 1 PR description
 
@@ -53,17 +73,11 @@ Two git stashes exist:
 - `stash@{0}: On feat/cmcd-cml-refactor: accidental-stash-pop-recovery` — created during a sub-phase B subagent's `git stash pop` mishap. Contains contaminated working state from that incident.
 - `stash@{1}: On task/revert-cmcd-v1: CMCD STUFF` — pre-existing user stash. Preserved.
 
-### Resuming work in a new session — sub-phase E prep
+### Resuming work in a new session — sub-phase F prep
 
-- **Verify CML pinned clone** is still at `/tmp/cml-pinned/`. Run `cd /tmp/cml-pinned && git rev-parse HEAD` — should output `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`. If missing or wrong SHA, re-clone:
-  ```bash
-  rm -rf /tmp/cml-pinned
-  git clone https://github.com/streaming-video-technology-alliance/common-media-library.git /tmp/cml-pinned
-  cd /tmp/cml-pinned && git checkout 22390e35dfbbe1e53d15648d3aace99cdf71f9dd
-  ```
-- **Sub-phase E scope (Tasks 1.11-1.12):** capture pre-delegation baseline + post-delegation wire output for the existing `test/util/cmcd_manager_unit.js` suite, diff, and classify each divergence as (a) intentional spec-conformance fix, (b) acceptable alignment with CML, or (c) bug to fix before shipping Phase 1. Update assertions for (a)/(b); resolve (c) before Phase 1 PR.
-- **Capturing the pre-delegation baseline** requires reverting sub-phase D temporarily. Cleanest: `git checkout 0f69e7f0e -- lib/util/cmcd_manager.js test/util/cmcd_manager_unit.js`, dump test wire output, reset, re-dump post-delegation. (The plan's literal `git stash`/`git stash pop` flow assumed sub-phase D was uncommitted; since it's now committed across `d8d614ce3` + `adfdfab05`, the checkout-from-prior-SHA flow is the equivalent.)
-- **Expected divergence categories** (pre-judgment): `nor` URLs path-relative → root-relative (intentional); CML's SFV encoder vs shaka's old comma-separated encoder may differ on string escaping, key ordering, and whether `v=2` is auto-added per shard in `toHeaders` (CML's `prepareCmcdData` adds `v` for V2; shaka's old encoder didn't). The `v=2` per-shard auto-add is the most likely (c)-class bug — shaka groups data into 4 shards before encoding, so without intervention every shard will emit `v=2`.
+- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as sub-phase D/E prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
+- **Sub-phase F scope (Tasks 1.13-1.14):** smoke-test the demo with CMCD enabled in both transmission modes, then open the Phase 1 PR. The smoke test verifies the wire-format changes against a real player flow (the test suite verifies them in isolation).
+- **Phase 1 PR description scaffolding** is in this plan — see "Sub-phase D landing notes", "Sub-phase E landing notes", and "Key architectural decisions in the port". Three intentional wire-format changes summarized: (1) `nor` URLs root-relative; (2) `'ld'`/`'lh'` `StreamingFormat` dropped; (3) V2 SFV encoding (token vs string for `e`/`sta`, `v=2` always present, `nor` inner-list).
 
 ---
 
