@@ -129,10 +129,145 @@ Two git stashes exist:
 
 ### Resuming work in a new session — Phase 3 prep
 
-- **Verify CML pinned clone** is still at `/tmp/cml-pinned/` (same as Phase 1/2 prep — should be `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`).
-- **Phase 3 scope (Tasks 3.1-3.16):** rewrite `lib/util/cmcd_manager.js` as a thin (~250-line) adapter around `cml.cmcd.CmcdReporter`. Delete the state machine, sequence-number bookkeeping, event timing, and most key-filtering logic — all of those move into `CmcdReporter`. Apply experimental v2 config renames (per spec). Delete the CMCD wire-format unit tests (~3500 lines of `cmcd_manager_unit.js`) and replace with adapter-glue + smoke tests.
-- **Phase 3 is the high-risk PR.** Watch for: state-transition timing differences (CML vs. shaka's existing transitions), per-target sequence-number behavior (Task 0.7), event-mode dispatch shape, `applyResponseData` mutation contract (Task 3.5).
-- **Phase 1 PR description scaffolding** lives at `plans/cmcd-cml-refactor/phase-1-pr-draft.md` (uncommitted scratch file). Phase 2 / 3 will accrete to the same file or be merged into one before the eventual all-phases PR.
+This subsection captures everything a fresh session needs to pick up Phase 3 cleanly. Spec.md and the per-task instructions above are still authoritative for the design — the items here are session-context that won't survive a context handoff otherwise.
+
+#### Branch + repo state at handoff (last commit `f0b99a8e0`)
+
+- 28 commits ahead of `origin/feat/cmcd-cml-refactor`, working tree clean. `.claude/` is untracked and intentional.
+- `lib/util/cmcd_manager.js` is **1580 lines**; Phase 3 target is ~250.
+- `test/util/cmcd_manager_unit.js` is **4296 lines**; Phase 3 deletes ~3500 (Bucket A wire-format tests) and adds ~600 (Bucket B/C adapter + smoke).
+- CML pin still `cmcd-v2.3.0` / `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`. Clone at `/tmp/cml-pinned/`. Re-verify: `cd /tmp/cml-pinned && git rev-parse HEAD`.
+- Two git stashes (`stash@{0}` accidental-stash-pop-recovery, `stash@{1}` task/revert-cmcd-v1) are user-owned. Don't drop without asking.
+- `plans/cmcd-cml-refactor/pr-draft.md` is the cumulative all-phases PR scaffolding. Phase 1 + Phase 2 sections present; Phase 3 needs to append (Public-API renames, behavioral changes, sequence-number outcome, event-mode dispatch note, test surface delta, deferred follow-ups). Update title if needed; current title is `refactor(cmcd): vendor @svta/cml-cmcd, replace custom encoder + state machine`.
+
+#### Decisions / gotchas inherited from earlier phases — must respect in Phase 3
+
+1. **Closure tooling rejects `@export`ed enum aliases.** Phase 2 tried `shaka.util.CmcdManager.StreamingFormat = cml.cmcd.CmcdStreamingFormat;` — both `clutz` (TS-defs gen) and `generateExterns.js` rejected the `MemberExpression` RHS. Same constraint applies to **Task 3.12 v2 re-exports** — must use literal `@enum {string} @export shaka.util.CmcdManager.EventType = { PLAY_STATE: 'ps', ... };` form, NOT alias. A new value-identity unit test should assert each public re-export equals the corresponding `cml.cmcd.*` enum (parallel to the existing `StreamingFormat alias` test in `cmcd_manager_unit.js:219`).
+2. **CMCD time-interval default value.** Shaka's old default was `10` seconds; CML's `CMCD_DEFAULT_TIME_INTERVAL` is `30`. Phase 2 inlined `10` as a magic number with a comment marking the deferral. Phase 3 must pick: (a) accept CML's `30` (call out as a wire-format change in PR description) or (b) override per-target via `interval` field in `toReporterConfig_`. Spec.md recommends (a); the CmcdReporter takes `interval` from `CmcdEventReportConfig`, so per-target override is straightforward.
+3. **Internal type annotations refer to `cml.cmcd.CmcdStreamingFormat` directly** (not `shaka.util.CmcdManager.StreamingFormat`) per Phase 2 — `this.sf_` private field, `getStreamFormat_` return type. Keep this pattern. The `shaka.util.CmcdManager.StreamingFormat` literal is the public-facing form (the `@export`ed alias-equivalent).
+4. **`setLowLatency` is now a no-op shim** (Phase 1 Task 1.10b dropped `'ld'`/`'lh'`). Phase 3 keeps it as a no-op for back-compat (Player still calls `cmcdManager_.setLowLatency(...)` at `lib/player.js:3073`); does NOT mutate `streamingFormat`. Spec.md § "Streaming format and low-latency" makes this explicit.
+5. **`shaka.util.CmcdManager.getEncodeOptions_` static helper** (added in Phase 1 sub-phase E) becomes obsolete in Phase 3 — `CmcdReporter` builds its own encode options internally. Delete it as part of Task 3.10.
+6. **Phase 1's `appendQueryToUri` static (the `goog.Uri`-based adapter)** was retained because CML's `appendCmcdQuery` has an incompatible signature. Phase 3 deletes it along with the other static encoders — `appendSrcData` and `appendTextTrackData` are the only remaining call sites, and both can use `cml.cmcd.appendCmcdQuery(uri, cmcdData, options)` directly.
+
+#### Concrete file pointers
+
+**`lib/util/cmcd_manager.js`:**
+- **Public methods to KEEP** (Player calls these directly — see `lib/player.js` references in parens):
+  - `setMediaElement(mediaElement)` (line 131; Player call at `lib/player.js:1407`).
+  - `configure(config)` (line 142; Player at `:4576`).
+  - `reset()` (line 151; Player at `:1646`).
+  - `setBuffering(buffering)` (line 178; Player call exists in buffering-observer wiring).
+  - `setLowLatency(lowLatency)` (line 201; Player at `:3073` — keep as no-op shim).
+  - `setStartTimeOfLoad(startTimeOfLoad)` (line 210; Player at `:3075`).
+  - `applyRequestData(type, request, context)` (line 238; Player at `:4003`).
+  - `applyResponseData(type, response, context)` (line 282; Player at `:4028`).
+  - `appendSrcData(uri, mimeType)` (line 456; Player at `:3386`).
+  - `appendTextTrackData(uri)` (line 485; Player at `:7330`).
+- **Shaka-knowledge helpers to KEEP** (the adapter's job to translate; spec § "Request/response interception"):
+  - `removeCmcdQueryFromUri_` (line 433) — used in response flow.
+  - `getObjectType_` (line 1019).
+  - `getBufferLength_` (line 1118).
+  - `getRemainingBufferLength_` (line 1142).
+  - `calculateRtp_` (line 1183) — `bitrate × rtpSafetyFactor`.
+  - `getStreamFormat_` (line 1210).
+  - `getStreamType_` (line 1231).
+  - `requestTimestampMap_` field — TTFB/TTLB measurement.
+  - `setupEventListeners_` (line 533) — needs full rewrite, not delete (replaces the existing playback-time tracking with reporter.update / recordEvent calls per spec § "Player state ↔ reporter state mapping").
+- **Methods/fields to DELETE** (state machine; CML reporter owns this now):
+  - `applyRequest_` (line 788), `applyManifestData` (line 304), `applyRequestSegmentData` (line 382), `applyResponseSegmentData` (line 331), `applyTextData` (line 410), `applyResponse_` (line 835), `sendCmcdRequest_` (line 849), `applyCmcdDataToRequest_` (line 897).
+  - `checkValidKeys_` (line 940), `filterKeys_` (line 968), `isValidEvent_` (line 984), `getCmcdTargetHash_` (line 1098).
+  - `reportEvent_` (line 714), `setupEventModeTimeInterval_` (line 623), `stopAndClearEventTimers_` (line 654), `getEventModeEnabledTargets_` (line 667).
+  - `createData_` (line 696), `getDataForSegment_` (line 1284), `getGenericData_` (line 1379), `getObjectTypeFromMimeType_` (line 1061).
+  - `onPlaybackPlay_` (line 512), `onPlaybackPlaying_` (line 523).
+  - State fields: `cmcdSequenceNumbers_`, `eventTimers_`, `msdSent_`, `playbackPlayTime_`, `playbackPlayingTime_`, `startTimeOfLoad_`, `playbackStarted_`, `buffering_`, `starved_`.
+  - Static class methods: `serialize`, `toQuery`, `toHeaders`, `appendQueryToUri`, `getEncodeOptions_` (all become unused once `applyRequest_`/`sendCmcdRequest_` are gone).
+
+**`externs/shaka/player.js`:**
+- `shaka.extern.CmcdTarget` typedef at lines 2742-2760. Per-target rename per spec: `timeInterval` (line 2754) → `interval`. Per-target `enabledKeys` is already `includeKeys` in shaka externs (line 2744) — no rename needed at this layer (spec's `enabledKeys → includeKeys` rename refers to shaka↔CML naming inside `toReporterConfig_`).
+- `shaka.extern.CmcdConfiguration` typedef at lines 2762-2824. Top-level rename: `targets` (lines 2771, 2819) → `eventTargets`. Update both the typedef and the `@property` JSDoc.
+
+**`externs/cmcd.js`:** Public-facing `CmcdData` typedef. Keep as-is — structurally equivalent to `cml.cmcd.Cmcd`, retains the existing public API surface. No changes needed in Phase 3.
+
+**`lib/player.js`:** Player wires the manager via `this.cmcdManager_` (private field at line 828). `createCmcd_` factory at line 4336 returns `new shaka.util.CmcdManager(this, this.config_.cmcd)`. Player passes `this` as the player ref — adapter calls `this.player_.getNetworkingEngine()` (current pattern at line 885) when it needs the networking engine for the requester callback. **Don't add a separate `networkingEngine_` field** — keep using `this.player_.getNetworkingEngine()` lazily inside `makeRequester_()`.
+
+#### CmcdReporter constructor + method signatures (verified in Phase 0)
+
+From `third_party/cml-cmcd/cmcd_reporter.js` and `cml-version.md`:
+
+```
+new cml.cmcd.CmcdReporter(config: CmcdReporterConfig, requester: (CmcdRequest) => Promise<{status: number}>)
+  // requester is the SECOND positional arg, not a config field.
+
+reporter.start()       // void; sets up time-interval timers, fires initial 't' event synchronously
+reporter.stop(flush)   // void; flush=true drains queued events before stopping
+reporter.flush()       // void; manual drain
+reporter.update(partialState)             // void; merges into persistent state
+reporter.recordEvent(eventType, data?)    // void; queues a discrete event for next dispatch
+reporter.createRequestReport(request, data?)   // returns R & CmcdRequestReport — derived object, NOT in-place mutation
+reporter.recordResponseReceived(response, data?)  // void; data is Partial<Cmcd>, not the flat {ttfb,ttlb,rc,url} shape
+```
+
+For `recordResponseReceived` (Task 3.5), spec § "Request/response interception" describes two valid call patterns: (a) supply `response.resourceTiming = {startTime, responseStart, duration}` to let CML auto-derive `ts/ttfb/ttlb`, or (b) pass `{ttfb, ttlb, rc, url}` as the `data` arg (overrides win). Adapter can mix — typical flow: pass `ttfb`/`ttlb` from `requestTimestampMap_` as `data`, let CML derive `ts` from `Date.now()` internally.
+
+#### Task 3.13 test rewrite — concrete starting points
+
+The current `test/util/cmcd_manager_unit.js` (4296 lines) structure:
+- Top-level `describe('CmcdManager Setup', ...)` wraps everything (lines 8-end).
+- Inside, `describe('CmcdManager CMCD V1', ...)` and `describe('CmcdManager CMCD V2', ...)` are the two big buckets — most of the wire-format coverage is here.
+- The `StreamingFormat alias` test at line 219 is the Phase 2 value-identity test — keep this; add parallel ones for `EventType` and `PlayerState` (Task 3.12).
+
+Bucket B / C tests should use a stubbed `CmcdReporter` (record calls) for unit coverage and a real one (drive end-to-end) for smoke. Look at how `cml.cmcd.CmcdReporter` is constructed in `cmcd_reporter.js:139` for the constructor signature.
+
+#### Task 3.14 demo update — minimum scope (per spec gap #8)
+
+Mirror dash.js's `cmcd-v2.html` precedent. Current demo CMCD UI lives in `demo/config.js` (grep `cmcd` for the existing controls). Add: transmission-mode toggle (query/headers — already exists as `useHeaders` checkbox), version selector (1/2 — `version` numeric input), single eventTarget editor (URL + events checklist + `interval` numeric input + `batchSize` numeric input + `includeKeys` checklist). Wire to `player.configure({cmcd: {...}})`.
+
+#### Smoke test pattern that worked in Phase 1 sub-phase F + Phase 2
+
+For driving the demo locally via Claude Preview MCP:
+
+1. Create `.claude/launch.json`:
+   ```json
+   {
+     "version": "0.0.1",
+     "configurations": [
+       {
+         "name": "shaka-demo",
+         "runtimeExecutable": "python3",
+         "runtimeArgs": ["-m", "http.server", "17765"],
+         "port": 17765
+       }
+     ]
+   }
+   ```
+2. Call `mcp__Claude_Preview__preview_start({name: "shaka-demo"})`.
+3. `preview_eval`: `window.location.href = 'http://localhost:17765/demo/'`.
+4. Configure CMCD via `player.configure({cmcd: {...}})` and `await player.load(...)`.
+5. Test asset: `https://storage.googleapis.com/shaka-demo-assets/bbb-dark-truths/dash.mpd`.
+6. **Header mode CORS workaround**: storage.googleapis.com blocks CMCD-* via CORS preflight. Use `player.getNetworkingEngine().registerRequestFilter((type, request) => {...})` to capture `request.headers` THEN strip CMCD-* before fetch. This is a smoke-test-only workaround — real deployments configure CDN CORS to accept `Access-Control-Allow-Headers: CMCD-*`.
+7. Cleanup: `mcp__Claude_Preview__preview_stop({serverId})`; `rm /Users/cocch1216/dev/shaka-player/.claude/launch.json`.
+
+#### Test invocation patterns
+
+```bash
+# CMCD-only filter (fast, ~5 sec):
+python3 build/test.py --browsers ChromeHeadless --quick --filter Cmcd \
+    --no-babel --reporters spec --spec-hide-passed
+
+# Full --quick suite (~65 sec, regression check):
+python3 build/test.py --browsers ChromeHeadless --quick \
+    --no-babel --reporters spec --spec-hide-passed
+
+# Build verification:
+python3 build/check.py --force                  # lint + spell + types (45 sec)
+python3 build/all.py --force                    # full bundle build (~4 min)
+```
+
+`text_displayer_layout_unit.js` failures (24 tests) appear flakily in full-suite runs but pass in isolation; they are environmental and unrelated to CMCD work. Confirmed across Phase 1 / Phase 2 sessions.
+
+#### PR strategy reminder
+
+**Do NOT push or open a PR after Phase 3.** User direction (revised 2026-04-28): single all-phases PR off `feat/cmcd-cml-refactor` once everything is done. Phase 3 ends with: (a) plan + memory + `pr-draft.md` updates committed, (b) branch sitting locally, (c) explicit user prompt to push when ready. The plan's Task 3.16 is dropped in this strategy (kept as scaffolding for the eventual single PR's description).
 
 ---
 
