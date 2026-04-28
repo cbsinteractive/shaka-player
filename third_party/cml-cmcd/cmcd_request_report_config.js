@@ -6,6 +6,7 @@
 goog.provide('cml.cmcd.CmcdRequestReportConfig');
 
 goog.requireType('cml.cmcd.CmcdKey');
+goog.requireType('cml.cmcd.CmcdTransmissionMode');
 goog.requireType('cml.cmcd.CmcdVersion');
 
 
@@ -17,15 +18,10 @@ goog.requireType('cml.cmcd.CmcdVersion');
  * of all properties (report config + request-specific) directly. All
  * members optional.
  *
- * `transmissionMode` is a `cml.cmcd.CmcdTransmissionMode` value
- * (`'query'` / `'headers'` / `'json'`); we use plain `string` here to
- * avoid a circular `goog.require` between this typedef and the
- * transmission-mode enum.
- *
  * @typedef {{
  *   version: (cml.cmcd.CmcdVersion|undefined),
  *   enabledKeys: (!Array<cml.cmcd.CmcdKey>|undefined),
- *   transmissionMode: (string|undefined)
+ *   transmissionMode: (cml.cmcd.CmcdTransmissionMode|undefined)
  * }}
  */
 cml.cmcd.CmcdRequestReportConfig;

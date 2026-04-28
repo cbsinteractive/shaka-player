@@ -388,7 +388,8 @@ cml.cmcd.CmcdReporter = class {
     const reqCustomData =
         /** @type {!Object<string, *>} */ (request['customData'] || {});
     const cmcd = /** @type {!cml.cmcd.Cmcd} */ (
-        reqCustomData['cmcd'] || /** @type {!cml.cmcd.Cmcd} */ ({}));
+        reqCustomData['cmcd'] != null ?
+            reqCustomData['cmcd'] : /** @type {!cml.cmcd.Cmcd} */ ({}));
 
     this.recordEvent(
         cml.cmcd.CMCD_EVENT_RESPONSE_RECEIVED,
@@ -408,7 +409,8 @@ cml.cmcd.CmcdReporter = class {
    * @deprecated Use `createRequestReport` instead.
    */
   applyRequestReport(req) {
-    return this.createRequestReport(req) || req;
+    const result = this.createRequestReport(req);
+    return result != null ? result : req;
   }
 
   /**
