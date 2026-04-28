@@ -167,6 +167,7 @@
 +../../third_party/cml-cmcd/cmcd_param.js
 +../../third_party/cml-cmcd/cmcd_player_state.js
 +../../third_party/cml-cmcd/cmcd_report_config.js
++../../third_party/cml-cmcd/cmcd_reporter.js
 +../../third_party/cml-cmcd/cmcd_reporter_config.js
 +../../third_party/cml-cmcd/cmcd_reporting_mode.js
 +../../third_party/cml-cmcd/cmcd_request.js

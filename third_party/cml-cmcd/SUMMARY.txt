@@ -26,6 +26,8 @@ cml-cmcd
     - cml-utils dep absorbed into `cml_utils.js` shim:
         * `uuid` (wraps `crypto.randomUUID()`; dead-codepath for shaka)
         * `urlToRelativePath` (used by `CMCD_FORMATTER_MAP`'s `nor`)
+        * `defaultRequester` (wraps `fetch`; dead-codepath for shaka —
+          adapter always supplies a custom requester via NetworkingEngine)
     - structured-field-values dep absorbed into `cml_sfv.js` shim:
         * `SfItem` / `SfToken` runtime classes
         * `encodeSfDict` (RFC 8941 §4.1 dictionary serializer; pulls in
@@ -37,3 +39,21 @@ cml-cmcd
       only in case (e.g., `CmcdV1.ts` typedef + `CMCD_V1.ts` numeric const
       → `cmcd_v1.js` + `cmcd_v1_const.js`). Affects v1, v2, HEADER_MAP,
       and FORMATTER_MAP.
+    - `CmcdReporter` constructor: TS class private fields (`#field` /
+      `private`) translate to Closure trailing-underscore-named fields
+      with `@private` (`this.requestTarget_`, `this.config_`, etc.).
+      Constructor positional signature `(config, requester)` preserved.
+      Internal helpers (`processEventTargets`, `sendEventReport`,
+      `recordTargetEvent`, `resetSession`) are trailing-underscore
+      methods. Module-scope helpers (`createEncodingOptions`,
+      `createCmcdReporterConfig`) are namespaced under
+      `cml.cmcd.CmcdReporter_*_`. State machine (per-target sequence
+      counters, sid-change reset, batching/flushing) preserved
+      verbatim.
+    - `setInterval` whitelisted in build/conformance.textproto for
+      `cmcd_reporter.js`. Upstream uses `setInterval` directly in
+      `start()`; replacing with `shaka.util.Timer` would break the
+      verbatim-port property and the per-bump diff stability, so the
+      conformance allowlist is extended for this single file.
+      `fetch` whitelisted for the dead-codepath `defaultRequester`
+      shim in `cml_utils.js`.
