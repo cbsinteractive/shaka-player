@@ -136,6 +136,8 @@
 +../../third_party/closure-uri/uri.js
 +../../third_party/closure-uri/utils.js
 
++../../third_party/cml-cmcd/append_cmcd_headers.js
++../../third_party/cml-cmcd/append_cmcd_query.js
 +../../third_party/cml-cmcd/cmcd.js
 +../../third_party/cml-cmcd/cmcd_custom_key.js
 +../../third_party/cml-cmcd/cmcd_custom_value.js
@@ -182,6 +184,23 @@
 +../../third_party/cml-cmcd/cmcd_version.js
 +../../third_party/cml-cmcd/cml_sfv.js
 +../../third_party/cml-cmcd/cml_utils.js
++../../third_party/cml-cmcd/encode_cmcd.js
++../../third_party/cml-cmcd/encode_prepared_cmcd.js
++../../third_party/cml-cmcd/ensure_headers.js
++../../third_party/cml-cmcd/group_cmcd_headers.js
++../../third_party/cml-cmcd/is_cmcd_custom_key.js
++../../third_party/cml-cmcd/is_cmcd_event_key.js
++../../third_party/cml-cmcd/is_cmcd_request_key.js
++../../third_party/cml-cmcd/is_cmcd_response_received_key.js
++../../third_party/cml-cmcd/is_cmcd_v1_key.js
++../../third_party/cml-cmcd/is_token_field.js
++../../third_party/cml-cmcd/is_valid.js
++../../third_party/cml-cmcd/prepare_cmcd_data.js
++../../third_party/cml-cmcd/to_cmcd_headers.js
++../../third_party/cml-cmcd/to_cmcd_query.js
++../../third_party/cml-cmcd/to_cmcd_url.js
++../../third_party/cml-cmcd/to_cmcd_value.js
++../../third_party/cml-cmcd/to_prepared_cmcd_headers.js
 
 +../../third_party/language-mapping-list/language-mapping-list.js
 
