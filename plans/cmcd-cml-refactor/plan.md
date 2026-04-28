@@ -12,6 +12,51 @@
 
 ---
 
+## Current status (last updated 2026-04-27)
+
+This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read this section first before resuming work in a new session.
+
+| Phase | Status | Commits / Notes |
+|---|---|---|
+| **Phase 0** — CML verification | ✅ Complete | Verification report at [`cml-version.md`](cml-version.md). CML pin: `cmcd-v2.3.0` / commit `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`. **No upstream CML PRs needed.** Five spec/plan doc fixes already applied. |
+| **Phase 1A** — Skeleton + typedefs + enums + constants + utils (Tasks 1.1-1.5) | ✅ Complete | 6 commits, ending at `e6cb2563d`. 44 files added under `third_party/cml-cmcd/`. |
+| **Phase 1B** — Encoders + helpers + cml-utils/sfv shims + deferred `CMCD_FORMATTER_MAP` (Tasks 1.6-1.7) | ✅ Complete | 5 commits, ending at `9bcf6614e`. 23 new files. Re-included 8 spec-excluded files (predicates + `is_valid.js` + `group_cmcd_headers.js`) that were genuinely runtime-required by encoders. New shim `cml_sfv.js` (~448 LoC, RFC 8941 §4.1 serializer). |
+| **Phase 1C** — `CmcdReporter` + 5 deferred typedefs (Task 1.8) | ✅ Complete | 3 commits, ending at `d682bb1bb`. 6 new files. The vendored port is now structurally complete. |
+| **Phase 1D** — Encoding delegation in `cmcd_manager.js` + drop non-spec `'ld'`/`'lh'` (Tasks 1.10, 1.10b) | ⏳ Not started | **First real shaka source change. Resume here.** |
+| **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ⏳ Not started | Needs human judgment on divergence classification. |
+| **Phase 1F** — Demo verification + Phase 1 PR (Tasks 1.13-1.14) | ⏳ Not started | Phase 1 ships as PR after this. |
+| **Phase 2** — Adopt CML constants, dedupe shaka duplicates | ⏳ Not started | After Phase 1 merges. |
+| **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ Not started | After Phase 2 merges. |
+
+**Vendored port summary:** [`third_party/cml-cmcd/`](../../third_party/cml-cmcd/) holds 68 JS files (typedefs + enums + constants + encoders + helpers + shims + `CmcdReporter`) + `LICENSE` + `NOTICE` + `SUMMARY.txt`. At HEAD (`d682bb1bb`), both `python3 build/check.py` and `python3 build/build.py` exit 0.
+
+### Key architectural decisions in the port — surface in Phase 1 PR description
+
+These were judgment calls during sub-phases B+C; maintainers should weigh in before merge:
+
+1. **`setInterval` whitelisted** in `build/conformance.textproto` for `third_party/cml-cmcd/cmcd_reporter.js`. The reporter calls `setInterval` directly for periodic time-interval event reporting. Alternatives considered: (a) patching the vendored reporter to use `shaka.util.Timer` (breaks verbatim parity), (b) filing a CML upstream PR for injectable-timer support (delays Phase 1). Whitelist is pragmatic but means **Phase 3 tests cannot inject a fake timer** — will need `jasmine.clock()`-based interval testing.
+2. **`fetch` whitelisted** in `build/conformance.textproto` for `third_party/cml-cmcd/cml_utils.js`. Used by `cml.cmcd.defaultRequester` — dead code at runtime because the shaka adapter always supplies a custom `requester` via `NetworkingEngine`. Closure ADVANCED is expected to strip the dead path, but the conformance check runs first.
+3. **`defaultRequester` relocated** from `CmcdReporter.ts` module scope into `cml_utils.js` as `cml.cmcd.defaultRequester`. Done to centralize the `fetch` whitelist scope to a single file. **Per-bump CML diff workflow needs to know** `defaultRequester` lives here, not in the reporter — otherwise CML 2.4.0+ bumps will look like the function vanished.
+
+### Open hygiene items (user-owned, untouched by this session)
+
+Two git stashes exist:
+- `stash@{0}: On feat/cmcd-cml-refactor: accidental-stash-pop-recovery` — created during a sub-phase B subagent's `git stash pop` mishap. Contains contaminated working state from that incident.
+- `stash@{1}: On task/revert-cmcd-v1: CMCD STUFF` — pre-existing user stash. Preserved.
+
+### Resuming work in a new session — sub-phase D prep
+
+- **Verify CML pinned clone** is still at `/tmp/cml-pinned/`. Run `cd /tmp/cml-pinned && git rev-parse HEAD` — should output `22390e35dfbbe1e53d15648d3aace99cdf71f9dd`. If missing or wrong SHA, re-clone:
+  ```bash
+  rm -rf /tmp/cml-pinned
+  git clone https://github.com/streaming-video-technology-alliance/common-media-library.git /tmp/cml-pinned
+  cd /tmp/cml-pinned && git checkout 22390e35dfbbe1e53d15648d3aace99cdf71f9dd
+  ```
+- **Sub-phase D scope:** modify `lib/util/cmcd_manager.js` to replace the static encoders (`serialize`, `toQuery`, `appendQueryToUri`, `urlToRelativePath`) with delegations to `cml.cmcd.encodeCmcd` / `cml.cmcd.appendCmcdQuery` / `cml.cmcd.appendCmcdHeaders`. Drop non-spec `'ld'`/`'lh'` `StreamingFormat` values per Task 1.10b. State machine, sequence numbers, event timing, public API all remain unchanged in this sub-phase.
+- **Sub-phase E (diff testing)** requires user judgment on classifying any wire-format divergences as (a) intentional spec-conformance fix, (b) acceptable alignment with CML, or (c) bugs to fix.
+
+---
+
 ## Plan structure
 
 - **Phase 0** — CML-side verification & upstream precursor PRs (no shaka commits).
