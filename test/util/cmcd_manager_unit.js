@@ -221,6 +221,21 @@ describe('CmcdManager', () => {
       expect(priv(manager)['reporter_']).toBeNull();
       expect(priv(manager)['lastPlayerState_']).toBeNull();
     });
+
+    it('reset preserves video_ so subsequent configure can rebuild', () => {
+      // Regression: shaka's lifecycle keeps the video element attached
+      // across `unload()`/`load()`. Reset must preserve `video_` so a
+      // post-unload `configure({material change})` can reconstruct the
+      // reporter without needing another `setMediaElement` call.
+      const player = createMockPlayer();
+      const {manager, config} = createManager(player);
+      manager.reset();
+      expect(priv(manager)['video_']).not.toBeNull();
+      // Now reconfigure with a material change — reporter should
+      // reconstruct and event listeners should re-attach.
+      manager.configure(Object.assign({}, config, {useHeaders: true}));
+      expect(priv(manager)['reporter_']).not.toBeNull();
+    });
   });
 
   // ── Configuration translation ──
