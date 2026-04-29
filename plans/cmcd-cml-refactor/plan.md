@@ -14,7 +14,7 @@
 
 ## Current status (last updated 2026-04-28)
 
-This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read this section first before resuming work in a new session.
+This refactor is functionally complete on branch `feat/cmcd-cml-refactor`. All three phases have landed locally (29 commits ahead of origin); a single all-phases PR is the user-driven next step.
 
 | Phase | Status | Commits / Notes |
 |---|---|---|
@@ -26,7 +26,7 @@ This refactor is actively in progress on branch `feat/cmcd-cml-refactor`. Read t
 | **Phase 1E** — Diff testing + assertion updates (Tasks 1.11-1.12) | ✅ Complete | 2 commits ending at `b94f7ebca`. Started at 52 of 124 CMCD tests failing post-1.10; ended at 0 fail / 124 pass. Three (c)-class adapter bugs fixed in `27cd16907`; ~80 (a)/(b)-class assertion updates in `b94f7ebca`. Full `--quick` suite: 2995/2995 pass. |
 | **Phase 1F** — Demo verification (Task 1.13) | ✅ Complete | Smoke-test on `bbb-dark-truths/dash.mpd` via Claude Preview-driven `python3 -m http.server`. Query mode (15 segment requests captured): `?CMCD=…cid="smoke-test",ot=m,sf=d,sid="…",sn=N,su,v=2` — `v=2` always present, `ts` absent in request mode, `sf=d` (no `'ld'`), `ot`/`sf`/`st` as tokens. Header mode (15 requests captured via request filter; CMCD-* stripped before fetch to avoid CORS preflight): `v=2` only in `CMCD-Session` shard (not in `CMCD-Object`/`Request`/`Status`); request shard contains `sn`/`mtp`/`su` only — no `ts`. Zero JS console errors. Per-phase PR (Task 1.14) deferred to single all-phases PR per user direction. |
 | **Phase 2** — Adopt CML constants, dedupe shaka duplicates (Tasks 2.1-2.5) | ✅ Complete | 1 commit at `67443aacb`. Net −74 LoC in `lib/util/cmcd_manager.js` (+12 LoC value-identity test in `test/util/cmcd_manager_unit.js`). 7 internal shaka enums deleted; `StreamingFormat` retained as `@export`ed literal (Closure tooling rejects alias form). `build/check.py` 0; CMCD tests 125/125; `--quick` suite 2996/2996; smoke test confirmed wire format unchanged. Task 2.6 (open Phase 2 PR) dropped per single-PR strategy. |
-| **Phase 3** — Adapter rewrite (the big behavioral change) | ⏳ **Resume here.** | After Phase 2's dedupe lands, Phase 3 rewrites `cmcd_manager.js` as a thin adapter around `cml.cmcd.CmcdReporter`. |
+| **Phase 3** — Adapter rewrite (Tasks 3.1-3.15) | ✅ Complete | 2 commits ending at `43cc7f332`. Net −1445 LoC in `lib/util/cmcd_manager.js` (1580 → ~700 incl. expanded JSDoc) and ~−4317 LoC in `test/util/cmcd_manager_unit.js` (4296 → ~880). Externs renamed (`targets`→`eventTargets`; per-target `timeInterval`→`interval`); per-target typedef gained `batchSize` and per-target `version` fields. New public re-exports `EventType`, `PlayerState`. Demo gained an `Event Targets (JSON)` editor. `build/check.py` 0; CMCD tests 57/57; `--quick` suite 2927/2927; `build/all.py` 0. End-to-end smoke verified V1+query, V2+query, V2+headers (with unload→reconfigure→reload cycle); `EventType`/`PlayerState`/`StreamingFormat` all appear in `dist/shaka-player.compiled.js`. **Task 3.16 dropped** per single-PR strategy. |
 
 **Vendored port summary:** [`third_party/cml-cmcd/`](../../third_party/cml-cmcd/) holds 68 JS files (typedefs + enums + constants + encoders + helpers + shims + `CmcdReporter`) + `LICENSE` + `NOTICE` + `SUMMARY.txt`. At HEAD (`adfdfab05`), `python3 build/check.py` exits 0. `python3 build/build.py` was last clean at `d682bb1bb` and is not expected to break under sub-phase D's source-only changes; not re-run this session.
 
@@ -112,6 +112,44 @@ Pure dedupe — no behavioral change beyond what Phase 1 already shipped. Single
 - V2 request mode now rejects `ts` in `includeKeys` (was accepted previously). `ts` is event-only per CTA-5004-B; the encoder filtered it out anyway since Phase 1 sub-phase E B2 — this aligns the upstream `includeKeys` validator with the encoder filter.
 - Event-mode validation accepts a strict superset of what shaka's old `V2EventModeKeys` allowed.
 - `isValidEvent_` accepts CML's 17 event types instead of shaka's 10 (adds the 7 ad / skip / custom-event types). shaka doesn't emit these, so user-facing impact is nil.
+
+### Phase 3 landing notes (Tasks 3.1-3.15)
+
+The behavioral rewrite. `lib/util/cmcd_manager.js` is now a ~700-line adapter (was 1580 LoC) around `cml.cmcd.CmcdReporter`, with the reporter owning state, encoding, key filtering, sequence numbering, and event-mode dispatch. The bulk of the LoC win is in tests: ~3500 lines of wire-format coverage (Bucket A) deleted because that responsibility now lives in CML upstream; ~600 lines of adapter-glue + smoke (Bucket B/C) added in their place.
+
+**Two commits ending at `43cc7f332`:**
+1. `965ba69f8` — `refactor(cmcd): rewrite shaka.util.CmcdManager as thin adapter around CmcdReporter`. The full behavioral rewrite + externs renames + v2 re-exports + test rewrite + demo update. Net −1445 / +5187 across 6 files.
+2. `43cc7f332` — `fix(cmcd): preserve video_ across reset() so configure() can rebuild reporter`. Smoke-surfaced bug: shaka keeps the video element attached across `unload()`/`load()` cycles, so the manager's `video_` field must NOT be cleared in `reset()` — otherwise a post-unload `configure(materialChange)` can't reconstruct the reporter. Adds a regression test for the unload→reconfigure→reload cycle.
+
+**Public-API renames** (experimental v2 surface in `shaka.extern.CmcdConfiguration`):
+- `targets` → `eventTargets` (top-level)
+- per-target `timeInterval` → `interval` (matches CML)
+- per-target `version`, `batchSize` exposed in the typedef
+
+**New public re-exports** (literal-form `@export` per Phase 2's Closure-tooling constraint; value-identity tests assert parity with the corresponding CML enums):
+- `shaka.util.CmcdManager.EventType` (17 entries — superset of shaka's old 10)
+- `shaka.util.CmcdManager.PlayerState` (10 entries — superset of shaka's old 4)
+
+**Wire-format alignments inherited from CML** (call out in the eventual all-phases PR description):
+- `sn` shifts from 1-based to 0-based.
+- Request-mode `sn` becomes a single global counter (was per-target-hash); resets on `sid` change.
+- `CMCD_DEFAULT_TIME_INTERVAL` adopts CML's `30` (was shaka's `10`) when the user does not specify a per-target `interval`.
+
+**Adapter design choices worth surfacing:**
+1. **`enabledKeys` defaults to all valid keys for the version** when the user's `includeKeys` is empty/missing. Without this expansion, CML's `createRequestReport` early-returns on an empty `enabledKeys` array — old shaka treated empty `includeKeys` as "include all", and existing user configs depend on that semantic.
+2. **`appendSrcData` / `appendTextTrackData` bypass the reporter** and call `cml.cmcd.appendCmcdQuery` directly with a synthesized CMCD object. `<video src=…>` and sidecar text-track loads can't carry custom request headers, so query-mode encoding is forced regardless of `useHeaders`. Per-request `sn` is omitted on this path (the reporter's per-target counters don't apply).
+3. **Multi-URI requests** (rare; alternate-CDN retry lists) get the same CMCD encoding applied to every URI in the list. The first URI is rewritten via `createRequestReport`; the encoded `CMCD=…` param is extracted and applied to the remaining URIs via URL parsing. All URIs share one `sn`.
+4. **`networkingEngine_` is read lazily** in `makeRequester_()` via `this.player_.getNetworkingEngine()`. No separate field — keeps the manager simple and avoids stale-reference issues if NetworkingEngine is recreated.
+5. **`m`/muted is event-only**, not persistent state. CTA-5004-B defines `m`/`um` as event types, not data keys; the adapter emits `MUTE`/`UNMUTE` events but does NOT call `update({m: …})`.
+
+**End-to-end smoke verification** (Claude Preview-driven `python3 -m http.server` on `bbb-dark-truths/dash.mpd`):
+- V1 + query: `cid="…",ot=m,sf=d,sid="…",sn=N,st=v` — no `v=` (V1 default semantic), no `ts` (request-mode filter).
+- V2 + query: `cid="…",ot=m,sf=d,sid="…",sn=0..N,st=v,v=2` — `v=2` always present, `ts` absent in request mode, `sn` 0-based.
+- V2 + headers (after `unload→configure({useHeaders: true})→load` cycle): `CMCD-Object: ot=m`, `CMCD-Request: sn=N`, `CMCD-Session: cid="…",sf=d,sid="…",st=v,v=2` — `v=2` only in Session shard, `sn` reset to 0 on session-id change.
+- Public re-exports `EventType`, `PlayerState`, `StreamingFormat` all readable at runtime from the compiled bundle, with values matching `cml.cmcd.*` exactly.
+- Zero CMCD-related console errors. (DASH manifest "Rejecting variant - not compatible with root" warnings are unrelated.)
+
+**Demo update:** added an `Event Targets (JSON)` text input that JSON-parses on change and `player.configure({cmcd: {eventTargets: [...]}})`s the result. Mirrors dash.js's `cmcd-v2.html` minimum scope. Version field converted to a numeric input. Added `'cmcd.eventTargets'` to the demo-unit `exceptions` set so the array-typed config field doesn't trip the "demo references unknown config" check.
 
 ### Key architectural decisions in the port — surface in Phase 1 PR description
 

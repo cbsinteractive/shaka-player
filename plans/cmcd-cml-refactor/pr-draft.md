@@ -1,7 +1,7 @@
 <!--
-Cumulative PR draft for the CMCD CML refactor. Phase 1 + Phase 2 are
-landed on feat/cmcd-cml-refactor; Phase 3 will append before the eventual
-single all-phases PR.
+Cumulative PR draft for the CMCD CML refactor. All three phases (Phase 1
+vendor + delegate, Phase 2 dedupe, Phase 3 adapter rewrite) are landed
+locally on feat/cmcd-cml-refactor and ready for the single all-phases PR.
 -->
 
 # Title
@@ -18,11 +18,11 @@ Replaces shaka's custom CMCD wire-format encoding and state machine with a vendo
 
 - **Phase 1** (Tasks 1.1-1.13) vendors the port and routes shaka's encoders through it. Three intentional wire-format changes (`nor` URL relativization, `'ld'`/`'lh'` dropped, V2 SFV-conformant encoding).
 - **Phase 2** (Tasks 2.1-2.5) dedupes shaka's internal enums and key arrays in favor of `cml.cmcd.*` equivalents. Pure dedupe; no behavior change.
-- **Phase 3** *(in progress)* rewrites `lib/util/cmcd_manager.js` as a thin adapter around `cml.cmcd.CmcdReporter`, deletes the state machine, ships experimental v2 config renames.
+- **Phase 3** (Tasks 3.1-3.15) rewrites `lib/util/cmcd_manager.js` (1580 → ~700 LoC) as a thin adapter around `cml.cmcd.CmcdReporter`. Deletes the state machine, sequence-number tracking, event timing, and mode-selection logic. Ships experimental v2 config renames (`targets`→`eventTargets`, per-target `timeInterval`→`interval`) and adds public `EventType` / `PlayerState` re-exports. Three additional wire-format alignments inherited from CML.
 
 See [`plans/cmcd-cml-refactor/spec.md`](plans/cmcd-cml-refactor/spec.md) and [`plans/cmcd-cml-refactor/plan.md`](plans/cmcd-cml-refactor/plan.md) for full design + rationale.
 
-Phases 1 + 2 are **behavior-preserving** for shaka's public API, modulo three documented intentional wire-format changes that align shaka with CTA-5004 / CTA-5004-B and CML's spec-conformant output.
+Phases 1 + 2 are **behavior-preserving** for shaka's public API, modulo documented intentional wire-format changes that align shaka with CTA-5004 / CTA-5004-B and CML's spec-conformant output. Phase 3 is the load-bearing behavioral change — the manager's external surface stays compatible, but the internal state machine, sequence-number scope, and event-mode dispatch path all flow through CML's reporter.
 
 ## What's vendored
 
@@ -115,26 +115,69 @@ Pure dedupe — no behavioral change beyond what Phase 1 shipped. Single commit 
 - Event-mode validation accepts a strict superset of what shaka's old `V2EventModeKeys` allowed.
 - `isValidEvent_` accepts CML's 17 event types instead of shaka's 10 (adds the 7 ad / skip / custom-event types). shaka doesn't emit these, so user-facing impact is nil.
 
-## Diff size (Phases 1 + 2; Phase 3 will append)
+## Phase 3 implementation summary
+
+The behavioral rewrite. `lib/util/cmcd_manager.js` shrinks from 1580 LoC to ~700, becoming a thin adapter around `cml.cmcd.CmcdReporter`. The reporter owns CMCD state, encoding, key filtering, sequence numbering, and event-mode dispatch; the adapter translates shaka's request/response/player events into reporter calls. The bulk of the LoC win is in tests: ~3500 lines of wire-format coverage (Bucket A) deleted because that responsibility now lives in CML upstream; ~600 lines of adapter-glue + smoke (Bucket B/C) added.
+
+**Two commits:**
+1. `965ba69f8` — `refactor(cmcd): rewrite shaka.util.CmcdManager as thin adapter around CmcdReporter`. The full behavioral rewrite + externs renames + v2 re-exports + test rewrite + demo update.
+2. `43cc7f332` — `fix(cmcd): preserve video_ across reset() so configure() can rebuild reporter`. Smoke-surfaced bug: shaka keeps the video element attached across `unload()`/`load()` cycles, so the manager's `video_` field must NOT be cleared in `reset()` — otherwise a post-unload `configure(materialChange)` can't reconstruct the reporter.
+
+**Public-API renames** (experimental v2 surface in `shaka.extern.CmcdConfiguration`):
+- top-level `targets` → `eventTargets`
+- per-target `timeInterval` → `interval` (matches CML's field name)
+- per-target typedef gains `batchSize` and per-target `version` fields
+
+**New public re-exports** (literal-form `@export` per Phase 2's Closure-tooling constraint; value-identity unit tests assert parity with the corresponding `cml.cmcd.*` enums):
+- `shaka.util.CmcdManager.EventType` — 17 entries (superset of shaka's old 10).
+- `shaka.util.CmcdManager.PlayerState` — 10 entries (superset of shaka's old 4).
+
+**Wire-format changes inherited from CML alignment:**
+1. **`sn` shifts from 1-based to 0-based.** CML's reporter initializes `sn = 0`; old shaka started at `1`. Consumers parsing `sn` as a counter index must adjust.
+2. **Request-mode `sn` becomes a single global counter** (was per-target-hash, where header-vs-query distinct configs got distinct counters); resets on `sid` change. In practice shaka doesn't expose runtime mode switching, so the practical impact is mostly the `sid`-rotation reset semantic.
+3. **`CMCD_DEFAULT_TIME_INTERVAL` adopts CML's `30`** (was shaka's `10`) when the user does not specify a per-target `interval`. Pre-Phase-3, `setupEventModeTimeInterval_` defaulted to 10 seconds; Phase 3 routes through CML's reporter, which uses the v2-default of 30.
+
+**Adapter design choices worth flagging:**
+1. **`enabledKeys` defaults to all valid keys for the version** when the user's `includeKeys` is empty/missing. Without this expansion, CML's `createRequestReport` early-returns on an empty `enabledKeys` array — old shaka treated empty `includeKeys` as "include all", and existing user configs depend on that semantic.
+2. **`appendSrcData` / `appendTextTrackData` bypass the reporter** and call `cml.cmcd.appendCmcdQuery` directly with a synthesized CMCD object. `<video src=…>` and sidecar text-track loads can't carry custom request headers, so query-mode encoding is forced regardless of `useHeaders`. Per-request `sn` is omitted on this path.
+3. **Multi-URI requests** (alternate-CDN retry lists; rare) get the same CMCD encoding applied to every URI. The first URI is rewritten via `createRequestReport`; the encoded `CMCD=…` param is extracted and applied to the remaining URIs via URL parsing. All URIs share one `sn`.
+4. **`networkingEngine_` is read lazily** in `makeRequester_()` via `this.player_.getNetworkingEngine()`. No separate field — keeps the manager simple and avoids stale-reference issues if NetworkingEngine is recreated.
+5. **`m`/muted is event-only, not persistent state.** CTA-5004-B defines `m`/`um` as event types, not data keys; the adapter emits `MUTE`/`UNMUTE` events but does NOT call `update({m: …})`.
+6. **`reset()` preserves `video_`.** Shaka's lifecycle keeps the video element attached across `unload()`/`load()` cycles; only `detach()` releases it. Preserving `video_` is what lets a post-unload `configure(materialChange)` rebuild the reporter and re-attach event listeners on the same video element.
+
+**Event-mode dispatch via NetworkingEngine.** CmcdReporter takes a `requester: (req) => Promise<{status: number}>` callback as its second positional arg for dispatching event-mode reports. Shaka wires this to `NetworkingEngine.request(RequestType.TIMING, ...)` instead of raw `fetch`, so event-mode reports inherit auth/retry/filters — same as manifests and segments. **No new public config field needed**; users already control transport via NetworkingEngine plugins. CML's reporter constructs `method: 'POST'` with a string body (structured-fields encoded by `encodeCmcd`, joined by `'\n'`), which the adapter wraps via `shaka.util.StringUtils.toUTF8` before passing to NetworkingEngine.
+
+**Demo update.** Adds an `Event Targets (JSON)` text input that JSON-parses on change and `player.configure({cmcd: {eventTargets: [...]}})`s the result. Mirrors dash.js's `cmcd-v2.html` minimum scope. Version field converted to a numeric input.
+
+**Deferred follow-ups** (out of scope for this PR):
+- Dedicated `RequestType.CMCD_EVENT_REPORT` request type. Phase 3 uses `RequestType.TIMING`; a follow-up PR can add a dedicated type without changing the adapter contract.
+- Expanded public re-export surface (`CmcdObjectType`, `CmcdStreamType`, `CmcdHeaderField`, etc.). These stay internal under `cml.cmcd.*` until users have a documented need.
+- TypeScript migration (tracked in [#8262](https://github.com/shaka-project/shaka-player/issues/8262)). The vendored directory deletes when this lands.
+
+## Diff size (all three phases)
 
 - `third_party/cml-cmcd/`: 74 new JS files + LICENSE/NOTICE/SUMMARY (+5017 lines, Phase 1).
-- `lib/util/cmcd_manager.js`: +100 / −138 (Phase 1) and +13 / −87 (Phase 2). Cumulative net −112 / +113.
-- `test/util/cmcd_manager_unit.js`: +107 / −140 (Phase 1) and +12 / 0 (Phase 2 value-identity test). Cumulative net −33 / +119.
+- `lib/util/cmcd_manager.js`: +100 / −138 (Phase 1), +13 / −87 (Phase 2), and +~700 / −1580 (Phase 3 — full rewrite). Cumulative net −920 / +810.
+- `test/util/cmcd_manager_unit.js`: +107 / −140 (Phase 1), +12 / 0 (Phase 2), and +~880 / −4296 (Phase 3 rewrite). Cumulative net −3550 / +1000.
+- `externs/shaka/player.js`: experimental `CmcdConfiguration` / `CmcdTarget` typedef updates (Phase 3).
+- `lib/util/player_configuration.js`: `cmcd.targets` → `cmcd.eventTargets` default (Phase 3).
+- `demo/config.js`: `Event Targets (JSON)` input added (Phase 3).
+- `test/demo/demo_unit.js`: `cmcd.eventTargets` added to the array-typed-config exceptions set.
 - `build/conformance.textproto`: 2 entries added (`setInterval`, `fetch`).
 - `build/types/core`: 74 entries added for the vendored files.
 - `plans/cmcd-cml-refactor/`: design + verification docs.
 
-**Total (Phases 1 + 2)**: ~85 files, ~+5800 / ~−500.
+**Total (all three phases)**: ~90 files, ~+6500 / ~−4400. Net positive ~+2100 lines (mostly the vendored CML port; net delete in shaka-side code is dramatic — ~3700 LoC removed from `lib/util/cmcd_manager.js` + tests).
 
 (Plan estimated ~3000 lines for the port; actual is ~5000 because of (a) `cml_sfv.js` (~448 LoC RFC 8941 serializer shim — CML uses `@svta/cml-utils`'s SFV encoder, which we vendor inline since the shim doesn't ship as a separate package), (b) 8 spec-excluded files re-included as runtime dependencies, and (c) generous license/notice headers per Apache 2.0.)
 
-## Verification (Phases 1 + 2)
+## Verification (all three phases)
 
-- [x] `python3 build/check.py` exits 0 (lint, conformance, types, spelling).
-- [x] `python3 build/all.py` exits 0 (full bundle build: dash/hls/compiled/ui/experimental, debug + release).
-- [x] `python3 build/test.py --filter Cmcd` — 125 / 125 pass (Phase 2 added a value-identity test).
-- [x] `python3 build/test.py --quick` — 2996 / 2996 pass (no regressions outside CMCD).
-- [x] Demo smoke test on `bbb-dark-truths/dash.mpd` — query mode emits `?CMCD=cid="…",ot=m,sf=d,sid="…",sn=N,su,v=2` (no `ts`, no `sf=ld`, tokens unquoted, `v=2` always present); header mode emits `v=2` only in `CMCD-Session` shard (the C2 sub-phase E fix verified end-to-end). Zero JS console errors. See [`plan.md`](plans/cmcd-cml-refactor/plan.md) "Sub-phase F landing notes" for the full capture.
+- [x] `python3 build/check.py --force` exits 0 (lint, conformance, types, spelling).
+- [x] `python3 build/all.py --force` exits 0 (full bundle build: dash/hls/compiled/ui/experimental, debug + release).
+- [x] `python3 build/test.py --filter Cmcd` — 57 / 57 pass (Phase 3 deletes ~125 wire-format tests now in CML, adds adapter glue + smoke).
+- [x] `python3 build/test.py --quick` — 2927 / 2927 pass (no regressions outside CMCD; 4 environmental skips on this branch are unrelated to this work).
+- [x] Demo smoke test on `bbb-dark-truths/dash.mpd` — V1+query, V2+query, V2+headers (with `unload→configure({useHeaders: true})→load` cycle) all emit correct CMCD output. Sequence numbers 0-based, reset on `sid` change. `v=2` only in `CMCD-Session` shard. Public re-exports (`EventType`, `PlayerState`, `StreamingFormat`) all readable at runtime from the compiled bundle. Zero CMCD-related console errors.
 
 ## Plan / spec docs
 
@@ -185,6 +228,12 @@ d663f6c12 docs(cmcd): mark Phase 1 sub-phase F complete; add all-phases PR draft
 **Phase 2 — Adopt CML constants/enums (1 commit):**
 ```
 67443aacb refactor(cmcd): adopt CML constants/enums; delete shaka duplicates
+```
+
+**Phase 3 — Adapter rewrite (2 commits):**
+```
+965ba69f8 refactor(cmcd): rewrite shaka.util.CmcdManager as thin adapter around CmcdReporter
+43cc7f332 fix(cmcd): preserve video_ across reset() so configure() can rebuild reporter
 ```
 
 The first 4 commits (`79702531e`–`6a851a2d8`) are Phase 0 docs only and could be split off as a docs-only PR if maintainers prefer. The rest are implementation.
