@@ -18,8 +18,10 @@ cml-cmcd
   Local mods:
     - TypeScript source converted to Closure-annotated JS by hand
     - Type-only imports erased; replaced with local closure typedefs
-    - Decoders, validators, predicates omitted (shaka emits CMCD; doesn't parse)
-    - cml-utils dep replaced with a 5-line uuid shim
+    - Decoder/parsing support omitted; runtime validators/predicate helpers
+      remain vendored
+    - cml-utils dep replaced with a local cml_utils.js shim providing uuid,
+      urlToRelativePath, and defaultRequester
 
 language-mapping-list
   A map of languages to their names, v0.0.16, by Ali Al Dallal / Mozilla.
