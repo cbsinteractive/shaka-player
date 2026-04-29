@@ -452,6 +452,46 @@ describe('CmcdManager', () => {
       expect(priv(manager)['requestTimestampMap_'].has(r)).toBe(true);
     });
 
+    it('sets su=true on segment requests while buffering (initial)', () => {
+      spyOn(priv(manager)['reporter_'], 'createRequestReport')
+          .and.callThrough();
+      const r = createRequest();
+      // lastPlayerState_ is null by default (not yet playing) → su=true
+      manager.applyRequestData(RequestType.SEGMENT, r,
+          createSegmentContext('video'));
+      const data = /** @type {!Object} */ (
+        priv(manager)['reporter_'].createRequestReport.calls
+            .mostRecent().args[1]);
+      expect(data.su).toBe(true);
+    });
+
+    it('sets su=false on segment requests when playing', () => {
+      spyOn(priv(manager)['reporter_'], 'createRequestReport')
+          .and.callThrough();
+      // Simulate player in PLAYING state
+      priv(manager)['lastPlayerState_'] = PlayerState.PLAYING;
+      const r = createRequest();
+      manager.applyRequestData(RequestType.SEGMENT, r,
+          createSegmentContext('video'));
+      const data = /** @type {!Object} */ (
+        priv(manager)['reporter_'].createRequestReport.calls
+            .mostRecent().args[1]);
+      expect(data.su).toBe(false);
+    });
+
+    it('sets su=true on segment requests during rebuffering', () => {
+      spyOn(priv(manager)['reporter_'], 'createRequestReport')
+          .and.callThrough();
+      priv(manager)['lastPlayerState_'] = PlayerState.REBUFFERING;
+      const r = createRequest();
+      manager.applyRequestData(RequestType.SEGMENT, r,
+          createSegmentContext('video'));
+      const data = /** @type {!Object} */ (
+        priv(manager)['reporter_'].createRequestReport.calls
+            .mostRecent().args[1]);
+      expect(data.su).toBe(true);
+    });
+
     it('handles HEAD method with empty payload', () => {
       spyOn(priv(manager)['reporter_'], 'createRequestReport')
           .and.callThrough();
@@ -492,6 +532,27 @@ describe('CmcdManager', () => {
       expect(priv(manager)['reporter_'].recordResponseReceived)
           .not.toHaveBeenCalled();
     });
+
+    it('cleans up requestTimestampMap_ even when response mode is disabled',
+        () => {
+          const player = createMockPlayer();
+          // Default config has no eventTargets → responseModeEnabled_=false
+          const {manager} = createManager(player);
+          const r = createRequest();
+          // Seed the timestamp map via applyRequestData
+          manager.applyRequestData(RequestType.SEGMENT, r,
+              createSegmentContext('video'));
+          expect(priv(manager)['requestTimestampMap_'].has(r)).toBe(true);
+          // applyResponseData should clean up even though rr reporting is off
+          manager.applyResponseData(RequestType.SEGMENT,
+              /** @type {shaka.extern.Response} */ ({
+                status: 200,
+                uri: 'https://test/seg.mp4',
+                originalRequest: r,
+                headers: {},
+              }));
+          expect(priv(manager)['requestTimestampMap_'].has(r)).toBe(false);
+        });
 
     it('forwards response data to recordResponseReceived', () => {
       const player = createMockPlayer();
@@ -682,6 +743,33 @@ describe('CmcdManager', () => {
       player.dispatchEvent(new shaka.util.FakeEvent('complete'));
       expect(priv(manager)['reporter_'].update).toHaveBeenCalledWith(
           {sta: PlayerState.ENDED});
+    });
+
+    it('emits msd on first playing event after setStartTimeOfLoad', () => {
+      spyOn(priv(manager)['reporter_'], 'update').and.callThrough();
+      const before = Date.now();
+      // Simulate player.js calling setStartTimeOfLoad with a timestamp ~200ms
+      // in the past to exercise the msd computation path.
+      manager.setStartTimeOfLoad(before - 200);
+      video.dispatchEvent(new shaka.util.FakeEvent('playing'));
+      const calls = /** @type {!Array} */ (
+        priv(manager)['reporter_'].update.calls.allArgs());
+      const msdCall = calls.find((args) => args[0] && args[0].msd != null);
+      expect(msdCall).toBeDefined();
+      expect(msdCall[0].msd).toBeGreaterThanOrEqual(200);
+      // startTimeOfLoad_ should be cleared so a second playing event
+      // does NOT re-emit msd.
+      expect(priv(manager)['startTimeOfLoad_']).toBe(0);
+    });
+
+    it('does not emit msd if setStartTimeOfLoad was not called', () => {
+      spyOn(priv(manager)['reporter_'], 'update').and.callThrough();
+      // startTimeOfLoad_ is 0 (falsy) by default
+      video.dispatchEvent(new shaka.util.FakeEvent('playing'));
+      const calls = /** @type {!Array} */ (
+        priv(manager)['reporter_'].update.calls.allArgs());
+      const msdCall = calls.find((args) => args[0] && args[0].msd != null);
+      expect(msdCall).toBeUndefined();
     });
   });
 

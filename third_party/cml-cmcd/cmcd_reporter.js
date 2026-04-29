@@ -563,6 +563,14 @@ cml.cmcd.CmcdReporter = class {
     const status = response.status;
 
     if (status === 410) {
+      // Clear the interval and drain the queue before removing the target
+      // so the orphaned setInterval does not keep firing after the Map
+      // entry is gone (which would prevent stop() from reaching it).
+      const state = this.eventTargets_.get(target);
+      if (state) {
+        clearInterval(state.intervalId);
+        state.queue = [];
+      }
       this.eventTargets_.delete(target);
     } else if (status === 429 || (status > 499 && status < 600)) {
       throw new Error(`Event report failed with status ${status}`);
