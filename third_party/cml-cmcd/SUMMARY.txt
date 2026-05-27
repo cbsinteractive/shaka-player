@@ -1,12 +1,12 @@
 cml-cmcd
-  Common Media Library CMCD encoder + reporter, v2.3.2,
+  Common Media Library CMCD encoder + reporter, v2.4.0,
   by Streaming Video Technology Alliance / Casey Occhialini et al.
   Apache 2.0 license.
   https://github.com/streaming-video-technology-alliance/common-media-library
     /tree/main/libs/cmcd
   Source npm: @svta/cml-cmcd
-  Pinned tag: cmcd-v2.3.2
-  Pinned commit: 244ecf05132ae1d1dc9cbd01479fd88f7695dbce
+  Pinned tag: cmcd-v2.4.0
+  Pinned commit: 5c4fa8d60794e2a68e9b286fb636c0eb0b217f83
 
   TRANSITIONAL: This vendored port exists because shaka-player uses Closure
   Compiler. When shaka migrates to TypeScript (issue #8262), delete this
