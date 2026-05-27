@@ -16,8 +16,13 @@ cml-cmcd
   Local mods:
     - TypeScript source converted to Closure-annotated JS by hand
     - Type-only imports erased; replaced with local closure typedefs
-    - Decoders (decodeCmcd, fromCmcd*) omitted: shaka emits CMCD only
-    - Validators (validateCmcd*) omitted: tooling-only utilities
+    - Decoders (decodeCmcd, fromCmcd*) omitted: shaka emits CMCD only.
+      The wire-format validators that would depend on these
+      (validateCmcdHeaders/Events/Request/EventReport) are also
+      omitted; the integration test does inline CMCD parsing instead.
+    - Data-level validators (validateCmcdKeys/Values/Structure +
+      composite validateCmcd) vendored at v2.4.0 as test-only — see
+      "Test-only additions" below.
     - Predicates (`is_cmcd_*_key.js`, `is_token_field.js`,
       `is_valid.js`) included: required at runtime by `prepareCmcdData`
       even though spec § "Excluded > Predicates" had marked them
@@ -56,3 +61,39 @@ cml-cmcd
       `start()`; replacing with `shaka.util.Timer` would break the
       verbatim-port property and the per-bump diff stability, so the
       conformance allowlist is extended for this single file.
+
+  Test-only additions (vendored at v2.4.0):
+    - Loaded by karma via the existing `third_party/**/*.js` pattern.
+    - NOT listed in `build/types/core`; absent from
+      `shaka-player.compiled.js`.
+    - Used by `test/util/cmcd_integration.js` to drive a real
+      `shaka.Player` against a local DASH stream + capture CMCD
+      wire output + validate decoded data against the CMCD spec.
+
+    Recorder + transport adapters (port of v2.4.0 additions):
+      - `cmcd_report_recorder.js` (the recorder class)
+      - `cmcd_recorded_report.js`, `cmcd_recorded_report_mode.js`,
+        `cmcd_recorded_request_type.js` (typedefs / enums)
+      - `cmcd_report_recorder_options.js`,
+        `cmcd_report_recorder_wait_options.js` (typedefs)
+      - `cmcd_transport_adapter.js` (typedef for the adapter contract
+        + `CmcdRequestDeliver` callback)
+      - `create_fetch_transport.js` (patches `globalThis.fetch`)
+      - `create_xhr_transport.js` (patches `XMLHttpRequest.prototype`)
+
+    Data-level validators (work on pre-decoded data):
+      - `validate_cmcd.js` (composite)
+      - `validate_cmcd_keys.js`, `validate_cmcd_values.js`,
+        `validate_cmcd_structure.js` (parts)
+      - `merge_validation_results.js` (helper)
+      - `cmcd_validation_severity.js`, `cmcd_validation_issue.js`,
+        `cmcd_validation_options.js`, `cmcd_validation_result.js`,
+        `cmcd_data_validation_result.js`,
+        `cmcd_events_validation_result.js` (typedefs)
+
+    Deliberately NOT vendored (would require porting upstream's
+    SFV decoder grammar, ~800 LoC of @svta/cml-structured-field-values):
+      - `decodeCmcd`, `fromCmcdHeaders`, `fromCmcdQuery`, `fromCmcdUrl`
+      - `validateCmcdHeaders`, `validateCmcdEvents`,
+        `validateCmcdRequest`, `validateCmcdEventReport`
+    The integration test does inline CMCD parsing instead.
