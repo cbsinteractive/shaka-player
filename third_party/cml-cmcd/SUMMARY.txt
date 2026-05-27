@@ -63,9 +63,21 @@ cml-cmcd
       conformance allowlist is extended for this single file.
 
   Test-only additions (vendored at v2.4.0):
-    - Loaded by karma via the existing `third_party/**/*.js` pattern.
-    - NOT listed in `build/types/core`; absent from
+    - Files live in `test/test/util/cml-cmcd/`, not here. They use
+      the `cml.cmcd.*` namespace via `goog.provide` and are loaded
+      by karma via the existing `test/**/*.js` pattern; absent from
       `shaka-player.compiled.js`.
+    - Why under `test/`: `build/check.py` rejects any .js file under
+      `third_party/` that is not in `build/types/core`. Adding these
+      to `build/types/core` would put them through the ADVANCED
+      production compile (which rejects them for unrelated reasons:
+      `setTimeout` conformance whitelist, strict-inexistent-property
+      warnings on `Object<string,*>` accesses, etc.). Living under
+      `test/` avoids both constraints.
+    - ESLint override in `eslint.config.mjs` exempts these files from
+      shaka style rules (function expressions, 2-space indent,
+      `.prototype` patching, etc.) so they stay verbatim ports of
+      upstream TS.
     - Used by `test/util/cmcd_integration.js` to drive a real
       `shaka.Player` against a local DASH stream + capture CMCD
       wire output + validate decoded data against the CMCD spec.
