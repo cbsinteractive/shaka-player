@@ -119,10 +119,10 @@ describe('CmcdManager integration', () => {
       return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
     }
     if (s.startsWith('(') && s.endsWith(')')) {
-      // Inner list — parse each item. For number-list keys (br, mtp, bl, etc.)
-      // items must be numbers. For string-list keys (nor, ec), items are strings
-      // or tokens. Parse each item as a number if it looks like one; otherwise
-      // leave as string.
+      // Inner list — parse each item. For number-list keys (br, mtp, bl,
+      // etc.) items must be numbers. For string-list keys (nor, ec), items
+      // are strings or tokens. Parse each item as a number if it looks like
+      // one; otherwise leave as string.
       return s.slice(1, -1).split(/\s+/).filter(Boolean).map((item) => {
         // Strip any item parameters (e.g., "4000000;label=hi" => 4000000)
         const itemNoParams = item.split(';')[0];
@@ -153,11 +153,13 @@ describe('CmcdManager integration', () => {
     if (typeof body === 'string') {
       return body;
     }
-    if (body instanceof ArrayBuffer) {
-      return new TextDecoder().decode(body);
-    }
     if (ArrayBuffer.isView(body)) {
       return new TextDecoder().decode(body.buffer);
+    }
+    // ArrayBuffer itself (not a typed-array view).
+    if (body && typeof body === 'object' &&
+        body.constructor && body.constructor.name === 'ArrayBuffer') {
+      return new TextDecoder().decode(/** @type {!ArrayBuffer} */ (body));
     }
     return String(body || '');
   }
@@ -226,8 +228,9 @@ describe('CmcdManager integration', () => {
    */
   function validateRecordedReport(report) {
     const decoded = decodeCmcdFromReport(report);
-    // Normalize scalar NUMBER_LIST values before validation (shaka may emit
-    // scalars for br, mtp, etc. even in v2 mode; the validator requires arrays).
+    // Normalize scalar NUMBER_LIST values before validation (shaka may
+    // emit scalars for br, mtp, etc. even in v2 mode; the validator
+    // requires arrays).
     const normalized = normalizeForValidation(decoded);
     const result = cml.cmcd.validateCmcd(normalized, {
       reportingMode:
@@ -274,8 +277,8 @@ describe('CmcdManager integration', () => {
     // Wrap it to fix null-body 204 responses that would otherwise trigger
     // shaka's HttpFetchPlugin assertion.
     const recorderFetch = globalThis.fetch;
-    const shakaCompatFetch = async function(input, init) {
-      const response = await recorderFetch.call(this, input, init);
+    const shakaCompatFetch = async (input, init) => {
+      const response = await recorderFetch(input, init);
       // The recorder returns new Response(null, {status:204}) for event
       // targets. Shaka asserts response.body is non-null for non-HEAD requests.
       // Upgrade to Response('', {status: 204}) to satisfy the assertion.
@@ -399,37 +402,37 @@ describe('CmcdManager integration', () => {
 
     it('nor is a valid string or string-list when present in segment reports',
         async () => {
-      await player.load(TEST_STREAM);
-      await video.play();
-      await waiter.waitForMovementOrFailOnTimeout(video, 10);
-      // Clear pre-play reports; wait for fresh reports from active playback.
-      recorder.clear();
-      const reports = await recorder.waitForSegments({count: 2});
-      // nor appears only when shaka knows the next segment URL. Not all
-      // streams or buffer states guarantee it. Validate it when present.
-      // In v2, nor is a STRING_LIST inner list → decoded as array of strings.
-      // In v1, nor is a plain string. Accept both.
-      for (const r of reports) {
-        const decoded = decodeCmcdFromReport(r);
-        if (decoded['nor'] !== undefined) {
-          if (Array.isArray(decoded['nor'])) {
-            // v2 STRING_LIST form: each element should be a string
-            decoded['nor'].forEach((item) => {
-              expect(typeof item)
-                  .withContext('nor array element should be a string')
-                  .toBe('string');
-            });
-          } else {
-            expect(typeof decoded['nor'])
-                .withContext('nor should be a string when present')
-                .toBe('string');
+          await player.load(TEST_STREAM);
+          await video.play();
+          await waiter.waitForMovementOrFailOnTimeout(video, 10);
+          // Clear pre-play reports; wait for fresh post-play reports.
+          recorder.clear();
+          const reports = await recorder.waitForSegments({count: 2});
+          // nor appears only when shaka knows the next segment URL. Not
+          // all streams or buffer states guarantee it. Validate when
+          // present. In v2, nor is a STRING_LIST inner list → decoded as
+          // array of strings. In v1, nor is a plain string. Accept both.
+          for (const r of reports) {
+            const decoded = decodeCmcdFromReport(r);
+            if (decoded['nor'] !== undefined) {
+              if (Array.isArray(decoded['nor'])) {
+                // v2 STRING_LIST form: each element should be a string
+                for (const item of decoded['nor']) {
+                  expect(typeof item)
+                      .withContext('nor array element should be a string')
+                      .toBe('string');
+                }
+              } else {
+                expect(typeof decoded['nor'])
+                    .withContext('nor should be a string when present')
+                    .toBe('string');
+              }
+            }
           }
-        }
-      }
-      // The test passes regardless of whether nor was emitted; its presence
-      // and value correctness (when emitted) are what we validate here.
-      expect(true).toBe(true);
-    });
+          // The test passes regardless of whether nor was emitted; its presence
+          // and value correctness (when emitted) are what we validate here.
+          expect(true).toBe(true);
+        });
 
     it('reflects state transitions (sta=p after playback)', async () => {
       await player.load(TEST_STREAM);
@@ -731,7 +734,8 @@ describe('CmcdManager integration', () => {
             return decoded['sta'] === 'p';
           });
       expect(staPlayFound)
-          .withContext('No segment should have sta=p when play() was never called')
+          .withContext(
+              'No segment should have sta=p when play() was never called')
           .toBe(false);
     });
   });
