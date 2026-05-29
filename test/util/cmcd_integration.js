@@ -6,7 +6,7 @@
 
 /**
  * @fileoverview CMCD integration tests. Drives a real shaka.Player
- * against a local DASH asset, uses cml.cmcd.CmcdReportRecorder to
+ * against a local HLS asset, uses cml.cmcd.CmcdReportRecorder to
  * capture CMCD wire output (across both fetch and XHR transports), and
  * uses an inline CMCD parser + cml.cmcd.validateCmcd to assert
  * spec-conformance.

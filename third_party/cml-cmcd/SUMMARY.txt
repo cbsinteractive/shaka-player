@@ -79,7 +79,7 @@ cml-cmcd
       `.prototype` patching, etc.) so they stay verbatim ports of
       upstream TS.
     - Used by `test/util/cmcd_integration.js` to drive a real
-      `shaka.Player` against a local DASH stream + capture CMCD
+      `shaka.Player` against a local HLS stream + capture CMCD
       wire output + validate decoded data against the CMCD spec.
 
     Recorder + transport adapters (port of v2.4.0 additions):
