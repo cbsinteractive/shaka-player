@@ -10,6 +10,7 @@ goog.provide('shakaDemo.Config');
 goog.require('goog.asserts');
 goog.require('shakaDemo.BoolInput');
 goog.require('shakaDemo.DatalistInput');
+goog.require('shakaDemo.Icons');
 goog.require('shakaDemo.InputContainer');
 goog.require('shakaDemo.NumberInput');
 goog.require('shakaDemo.SelectInput');
@@ -106,6 +107,7 @@ shakaDemo.Config = class {
     this.addUISection_();
     this.addUISeekBarColorsSection_();
     this.addUIVolumeBarColorsSection_();
+    this.addUIPlaybackRateBarColorsSection_();
     this.addUIQualityMarksSection_();
     this.addUIMediaSessionSection_();
     this.addUIDocumentPiPSection_();
@@ -420,9 +422,6 @@ shakaDemo.Config = class {
 
     const docLink = this.resolveExternLink_('.TextDisplayerConfiguration');
     this.addSection_('Text displayer', docLink)
-        .addNumberInput_('Captions update period',
-            'textDisplayer.captionsUpdatePeriod',
-            /* canBeDecimal= */ true)
         .addNumberInput_('Font scale factor',
             'textDisplayer.fontScaleFactor',
             /* canBeDecimal= */ true)
@@ -444,10 +443,35 @@ shakaDemo.Config = class {
         .addBoolInput_('Enabled', 'cmcd.enabled')
         .addTextInput_('Session ID', 'cmcd.sessionId')
         .addTextInput_('Content ID', 'cmcd.contentId')
-        .addTextInput_('Version', 'cmcd.version')
+        .addNumberInput_('Version', 'cmcd.version',
+            /* canBeDecimal= */ false)
         .addNumberInput_('RTP safety Factor', 'cmcd.rtpSafetyFactor',
             /* canBeDecimal= */ true)
         .addBoolInput_('Use Headers', 'cmcd.useHeaders');
+
+    // CMCD v2 event-mode targets. JSON because the typedef is an
+    // array of objects with several fields each; a per-field UI would
+    // bloat the demo significantly.
+    const eventTargetsTooltip =
+        'JSON array of event-mode CmcdTarget objects, e.g. ' +
+        '[{"enabled":true,"url":"https://collector/cmcd",' +
+        '"events":["ps","rr"],"interval":30,"includeKeys":[]}]';
+    const onTargetsChange = (input) => {
+      try {
+        const parsed = input.value.trim() ? JSON.parse(input.value) : [];
+        shakaDemoMain.configure('cmcd.eventTargets', parsed);
+        shakaDemoMain.remakeHash();
+        input.setCustomValidity('');
+      } catch (e) {
+        input.setCustomValidity('Invalid JSON');
+      }
+    };
+    this.addCustomTextInput_(
+        'Event Targets (JSON)', onTargetsChange, eventTargetsTooltip);
+    const current = /** @type {Array<*>} */ (
+      shakaDemoMain.getCurrentConfigValue('cmcd.eventTargets'));
+    this.latestInput_.input().value =
+        (current && current.length) ? JSON.stringify(current) : '';
   }
 
   /** @private */
@@ -497,6 +521,10 @@ shakaDemo.Config = class {
             'ads.disableTrackingEvents')
         .addBoolInput_('Disable Snapback',
             'ads.disableSnapback')
+        .addBoolInput_('Disable played linear ad skip (MediaTailor)',
+            'ads.disablePlayedLinearAdSkip')
+        .addBoolInput_('Disable tracking for played linear ads (MediaTailor)',
+            'ads.disableTrackingForPlayedLinearAds')
         .addNumberInput_('Interstitial preload ahead time',
             'ads.interstitialPreloadAheadTime',
             /* canBeDecimal= */ true,
@@ -723,7 +751,10 @@ shakaDemo.Config = class {
             'streaming.returnToEndOfLiveWindowWhenOutside')
         .addBoolInput_(
             'Stop fetching new segments on pause',
-            'streaming.stopFetchingOnPause');
+            'streaming.stopFetchingOnPause')
+        .addBoolInput_(
+            'Process metadata when using src=',
+            'streaming.processSrcEqualMetadata');
     this.addRetrySection_('streaming', 'Streaming Retry Parameters');
     this.addLiveSyncSection_();
   }
@@ -806,6 +837,18 @@ shakaDemo.Config = class {
             'mediaSource.useSourceElements')
         .addBoolInput_('Expect updateEnd when duration is truncated',
             'mediaSource.durationReductionEmitsUpdateEnd');
+
+    const transmuxWorkerToggleOnChange = (input) => {
+      const url = input.checked ?
+          shakaDemoMain.getTransmuxerWorkerUrl() : '';
+      shakaDemoMain.configure('mediaSource.transmuxWorkerUrl', url);
+      shakaDemoMain.remakeHash();
+    };
+    this.addCustomBoolInput_(
+        'Use a worker for transmuxing', transmuxWorkerToggleOnChange);
+    if (shakaDemoMain.getCurrentConfigValue('mediaSource.transmuxWorkerUrl')) {
+      this.latestInput_.input().checked = true;
+    }
   }
 
   /**
@@ -838,9 +881,7 @@ shakaDemo.Config = class {
       deleteBtn.classList.add(
           'pref-entry-delete', 'mdl-button', 'mdl-js-button',
           'mdl-button--icon');
-      const deleteIcon = document.createElement('i');
-      deleteIcon.classList.add('material-icons-round');
-      deleteIcon.textContent = 'close';
+      const deleteIcon = shakaDemo.Icons.makeSvgIcon(shakaDemo.Icons.CLOSE);
       deleteBtn.appendChild(deleteIcon);
       const indexForDelete = i;
       deleteBtn.addEventListener('click', () => {
@@ -1189,6 +1230,12 @@ shakaDemo.Config = class {
         .addUIArrayStringInput_('Statistics List', 'statisticsList')
         .addUIArrayStringInput_('Ad Statistics List', 'adStatisticsList')
         .addUIArrayNumberInput_('Playback Rates', 'playbackRates')
+        .addUINumberInput_('Playback Rate Slider Min',
+            'playbackRateSliderMin',
+            /* canBeDecimal= */ true)
+        .addUINumberInput_('Playback Rate Slider Max',
+            'playbackRateSliderMax',
+            /* canBeDecimal= */ true)
         .addUIArrayNumberInput_('Fast Forward Rates', 'fastForwardRates')
         .addUIArrayNumberInput_('Rewind Rates', 'rewindRates')
         .addUIArrayNumberInput_('Captions Font Scale Factors',
@@ -1213,6 +1260,14 @@ shakaDemo.Config = class {
     this.addSection_('UI: Volume Bar Colors', docLink)
         .addUITextInput_('Base Color', 'volumeBarColors.base')
         .addUITextInput_('Level Color', 'volumeBarColors.level');
+  }
+
+  /** @private */
+  addUIPlaybackRateBarColorsSection_() {
+    const docLink = this.resolveExternLink_('.UIPlaybackRateBarColors');
+    this.addSection_('UI: Playback Rate Bar Colors', docLink)
+        .addUITextInput_('Base Color', 'playbackRateBarColors.base')
+        .addUITextInput_('Level Color', 'playbackRateBarColors.level');
   }
 
   /** @private */

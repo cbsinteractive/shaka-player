@@ -12,7 +12,6 @@ goog.require('shaka.Player');
 goog.require('shaka.ui.Controls');
 goog.require('shaka.ui.Enums');
 goog.require('shaka.ui.Locales');
-goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.OverflowMenu');
 goog.require('shaka.ui.Overlay.TrackLabelFormat');
 goog.require('shaka.ui.SettingsMenu');
@@ -69,15 +68,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     spanWrapper.appendChild(this.qualityMark);
 
     this.eventManager.listenMulti(
-        this.localization,
-        [
-          shaka.ui.Localization.LOCALE_UPDATED,
-          shaka.ui.Localization.LOCALE_CHANGED,
-        ], () => {
-          this.updateLocalizedStrings_();
-        });
-
-    this.eventManager.listenMulti(
         this.player,
         [
           'loading',
@@ -91,18 +81,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
           this.updateSelection_();
           this.updateLabels_();
         });
-
-    if (this.isSubMenu) {
-      this.eventManager.listenMulti(
-          this.controls,
-          [
-            'submenuopen',
-            'submenuclose',
-          ], () => {
-            this.updateSelection_();
-            this.updateLabels_();
-          });
-    }
 
     this.updateSelection_();
   }
@@ -248,10 +226,8 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
 
     // If abr is enabled reflect it by marking 'Auto' as selected.
     if (this.player.getConfiguration().abr.enabled) {
-      autoButton.setAttribute('aria-checked', 'true');
       autoButton.appendChild(shaka.ui.Utils.checkmarkIcon());
-
-      this.abrOnSpan_.classList.add('shaka-chosen-item');
+      shaka.ui.Utils.setChosenItem(autoButton, this.abrOnSpan_);
 
       this.currentSelection.textContent =
           this.localization.resolve(shaka.ui.Locales.Ids.AUTO_QUALITY);
@@ -264,7 +240,7 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     this.controls.dispatchEvent(
         new shaka.util.FakeEvent('resolutionselectionupdated'));
 
-    this.updateLocalizedStrings_();
+    this.updateLocalizedStrings();
 
     shaka.ui.Utils.setDisplay(
         this.button, numberOfTracks > 0 && !this.isSubMenuOpened);
@@ -352,9 +328,8 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
 
       if (!abrEnabled && track == selectedTrack) {
         // If abr is disabled, mark the selected track's resolution.
-        button.setAttribute('aria-checked', 'true');
         button.appendChild(shaka.ui.Utils.checkmarkIcon());
-        span.classList.add('shaka-chosen-item');
+        shaka.ui.Utils.setChosenItem(button, span);
         this.currentSelection.textContent = span.textContent;
       }
       this.menu.appendChild(button);
@@ -362,7 +337,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
 
     return tracks.length;
   }
-
 
   /**
    * @return {number}
@@ -447,9 +421,8 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
 
       if (!abrEnabled && track == selectedTrack) {
         // If abr is disabled, mark the selected track's resolution.
-        button.setAttribute('aria-checked', 'true');
         button.appendChild(shaka.ui.Utils.checkmarkIcon());
-        span.classList.add('shaka-chosen-item');
+        shaka.ui.Utils.setChosenItem(button, span);
         this.currentSelection.textContent = span.textContent;
       }
       this.menu.appendChild(button);
@@ -457,7 +430,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
 
     return tracks.length;
   }
-
 
   /**
    * @param {!shaka.extern.VideoTrack} track
@@ -549,7 +521,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     return text;
   }
 
-
   /**
    * @param {!shaka.extern.VideoTrack} track
    * @return {boolean}
@@ -562,7 +533,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     const codec = shaka.util.MimeUtils.getNormalizedCodec(track.codecs);
     return codec.startsWith('dovi-');
   }
-
 
   /**
    * @param {!shaka.extern.VideoTrack} track
@@ -577,7 +547,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     return codec.startsWith('lcevc');
   }
 
-
   /**
    * @param {?string} codecs
    * @return {string}
@@ -591,7 +560,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     }
     return name ? ' ' + name : name;
   }
-
 
   /**
    * @param {!shaka.extern.Track} track
@@ -620,7 +588,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     return text;
   }
 
-
   /**
    * @param {number} bandwidth
    * @return {string}
@@ -634,7 +601,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     }
   }
 
-
   /**
    * @param {!shaka.extern.VideoTrack} track
    * @private
@@ -646,7 +612,6 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     const clearBuffer = this.controls.getConfig().clearBufferOnQualityChange;
     this.player.selectVideoTrack(track, clearBuffer);
   }
-
 
   /**
    * @param {!shaka.extern.Track} track
@@ -660,21 +625,19 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
     this.player.selectVariantTrack(track, clearBuffer);
   }
 
-
-  /**
-   * @private
-   */
-  updateLocalizedStrings_() {
+  /** @override */
+  updateLocalizedStrings() {
     const LocIds = shaka.ui.Locales.Ids;
     const locId = this.player.isAudioOnly() ?
         LocIds.QUALITY : LocIds.RESOLUTION;
 
-    this.button.ariaLabel = this.localization.resolve(locId);
-    this.backButton.ariaLabel = this.localization.resolve(locId);
-    this.backSpan.textContent =
-        this.localization.resolve(locId);
-    this.nameSpan.textContent =
-        this.localization.resolve(locId);
+    this.backButton.ariaLabel = this.localization.resolve(LocIds.BACK);
+
+    const label = this.localization.resolve(locId);
+    this.button.ariaLabel = label;
+    this.nameSpan.textContent = label;
+    this.backSpan.textContent = label;
+
     this.abrOnSpan_.textContent =
         this.localization.resolve(LocIds.AUTO_QUALITY);
 
@@ -682,6 +645,12 @@ shaka.ui.ResolutionSelection = class extends shaka.ui.SettingsMenu {
       this.currentSelection.textContent =
           this.localization.resolve(shaka.ui.Locales.Ids.AUTO_QUALITY);
     }
+  }
+
+  /** @override */
+  checkAvailability() {
+    this.updateSelection_();
+    this.updateLabels_();
   }
 };
 

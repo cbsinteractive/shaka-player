@@ -53,6 +53,7 @@ The following elements can be added to the UI bar using this configuration value
 * play_pause_buffering: adds a button that plays/pauses the video on click.
 * mute: adds a button that mutes/unmutes the video on click.
 * volume: adds a volume slider.
+* mute_volume: adds a combined mute button and volume slider in a single container.
 * fullscreen: adds a button that toggles full screen mode on click.
 * overflow_menu: adds a button that opens an overflow menu with additional settings
   buttons. It's content is also configurable.
@@ -122,6 +123,7 @@ The following buttons can be added to the overflow menu:
   is visible only if playing a VR content.
 * ad_statistics: adds a button that displays ad statistics of the video.
 * save_video_frame: adds a button to save the current video frame.
+* copy_video_frame: adds a button to copy the current video frame to the clipboard.
 * chapter: adds a button that controls the chapter selection.
 * mute: adds a button that mutes/unmutes the video on click.
 * captions-position: adds a button that controls the position of the captions.
@@ -156,6 +158,8 @@ The following elements can be added as big buttons using this configuration valu
 * fast_forward: adds a button that fast forwards the presentation on click; that is, it
   starts playing the presentation at an increased speed
 * picture_in_picture: adds a button that enables/disables picture-in-picture mode on browsers
+  that support it. Button is invisible on other browsers. Note that it will use the
+  [Document Picture-in-Picture API]() if supported.
 * remote: adds a button that opens a Remote Playback dialog. The button is visible only if the
   browser supports Remote Playback API.
 * loop: adds a button that controls if the currently selected video is played in a loop.
@@ -191,15 +195,7 @@ ui.configure(config);
 #### Replacing the default context menu
 
 A custom context menu can be added through the `customContextMenu` boolean. Additionally, the `contextMenuElements` option can be used to add elements to it.
-The following buttons can be added to the context menu:
-* statistics: adds a button that displays statistics of the video.
-* loop: adds a button that controls if the currently selected video is played in a loop.
-* picture_in_picture: adds a button that enables/disables picture-in-picture mode on browsers
-  that support it. Button is invisible on other browsers. Note that it will use the 
-  [Document Picture-in-Picture API]() if supported.
-* ad_statistics: adds a button that displays ad statistics of the video.
-* save_video_frame: adds a button to save the current video frame.
-* mute: adds a button that mutes/unmutes the video on click.
+The `contextMenuElements` configuration supports the same elements as `overflowMenuButtons`. Refer to the `overflowMenuButtons` section above for the full list of supported menu items and their descriptions.
 
 Example:
 ```js
@@ -350,6 +346,45 @@ uiConfig['controlPanelElements'] = ['rewind', 'fast_forward', 'skip'];
 ```
 <!-- TODO: Create a doc on best a11y practices for custom buttons and link to the
   localization docs explaining how to take advantage of our localization system. -->
+
+#### Customizing the UI with CSS variables
+
+Shaka Player UI exposes styling through CSS custom properties defined on the :root.
+
+This allows applications to easily theme the player without modifying the source CSS.
+
+##### Example
+```css
+:root {
+  /* Layout */
+  --shaka-controls-w: 98%;
+
+  /* Typography */
+  --shaka-font-family: roboto, sans-serif;
+  --shaka-font-color: white;
+  --shaka-font-size: 14px;
+
+  /* Backgrounds */
+  --shaka-bg: rgba(0, 0, 0, 0.5);
+  --shaka-bg-hover: rgba(0, 0, 0, 0.75);
+
+  /* Controls */
+  --shaka-thumb-color: white;
+  --shaka-track-color: white;
+}
+```
+
+##### Using modern vs legacy builds
+
+If you are using the modern UI build, CSS custom properties are preserved and can be overridden at runtime.
+
+If you are using the legacy UI build, CSS custom properties are processed at build time for compatibility, but the variables remain in the output CSS and include fallback values for older browsers that do not support them.
+
+##### Recommendation
+
+Use:
+- controls.modern.css → when targeting modern browsers (recommended)
+- controls.css → when supporting older browsers
 
 ####  Shaka Theme Gallery
 <!-- cspell: disable-next-line -->

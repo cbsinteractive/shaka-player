@@ -10,20 +10,17 @@ goog.provide('shaka.ui.TextSize');
 goog.require('shaka.ui.Controls');
 goog.require('shaka.ui.Enums');
 goog.require('shaka.ui.Locales');
-goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.OverflowMenu');
-goog.require('shaka.ui.SettingsMenu');
-goog.require('shaka.ui.Utils');
-goog.require('shaka.util.Dom');
+goog.require('shaka.ui.TextStyleMenu');
 goog.requireType('shaka.ui.Controls');
 
 
 /**
- * @extends {shaka.ui.SettingsMenu}
+ * @extends {shaka.ui.TextStyleMenu<number>}
  * @final
  * @export
  */
-shaka.ui.TextSize = class extends shaka.ui.SettingsMenu {
+shaka.ui.TextSize = class extends shaka.ui.TextStyleMenu {
   /**
    * @param {!HTMLElement} parent
    * @param {!shaka.ui.Controls} controls
@@ -36,155 +33,48 @@ shaka.ui.TextSize = class extends shaka.ui.SettingsMenu {
     this.button.classList.add('shaka-tooltip');
     this.menu.classList.add('shaka-text-positions');
 
-    this.eventManager.listenMulti(
-        this.localization,
-        [
-          shaka.ui.Localization.LOCALE_UPDATED,
-          shaka.ui.Localization.LOCALE_CHANGED,
-        ], () => {
-          this.updateLocalizedStrings_();
-        });
-
-    this.eventManager.listenMulti(
-        this.player,
-        [
-          'loading',
-          'unloading',
-          'configurationchanged',
-          'trackschanged',
-        ], () => {
-          this.updateTextSizeSelection_();
-          this.checkAvailability_();
-        });
-
-    if (this.isSubMenu) {
-      this.eventManager.listenMulti(
-          this.controls,
-          [
-            'submenuopen',
-            'submenuclose',
-          ], () => {
-            this.checkAvailability_();
-          });
-    }
-
-    // Set up all the strings in the user's preferred language.
-    this.updateLocalizedStrings_();
-
-    this.checkAvailability_();
-    this.addTextSizes_();
-    this.updateTextSizeSelection_();
-  }
-
-  /** @private */
-  checkAvailability_() {
-    const tracks = this.player.getTextTracks() || [];
-    const hasTrack = tracks.some((track) => track.active);
-    const available = hasTrack && !this.isSubMenuOpened &&
-        this.controls.getConfig().captionsStyles;
-    shaka.ui.Utils.setDisplay(this.button, available);
-    if (available) {
-      this.button.ariaPressed = 'true';
-    } else {
-      this.button.ariaPressed = 'false';
-    }
-  }
-
-  /**
-   * @private
-   */
-  updateLocalizedStrings_() {
-    const LocIds = shaka.ui.Locales.Ids;
-
-    this.button.ariaLabel = this.localization.resolve(LocIds.SUBTITLE_SIZE);
-    this.backButton.ariaLabel = this.localization.resolve(LocIds.BACK);
-    this.nameSpan.textContent =
-        this.localization.resolve(LocIds.SUBTITLE_SIZE);
-    this.backSpan.textContent =
-        this.localization.resolve(LocIds.SUBTITLE_SIZE);
-  }
-
-  /** @private */
-  addTextSizes_() {
-    // Remove old shaka-resolutions
-    // 1. Save the back to menu button
-    const backButton = shaka.ui.Utils.getFirstDescendantWithClassName(
-        this.menu, 'shaka-back-to-overflow-button');
-
-    // 2. Remove everything
-    shaka.util.Dom.removeAllChildren(this.menu);
-
-    // 3. Add the backTo Menu button back
-    this.menu.appendChild(backButton);
-
-    // 4. Add new items
-    for (const fontScaleFactor of
-      this.controls.getConfig().captionsFontScaleFactors) {
-      const button = shaka.util.Dom.createButton();
-      // ARIA: single-select menu item
-      button.setAttribute('role', 'menuitemradio');
-      button.setAttribute('aria-checked', 'false');
-      const span = shaka.util.Dom.createHTMLElement('span');
-      span.textContent = fontScaleFactor * 100 + '%';
-      button.appendChild(span);
-
-      this.eventManager.listen(button, 'click', () => {
-        this.player.configure('textDisplayer.fontScaleFactor', fontScaleFactor);
-        this.updateTextSizeSelection_();
-      });
-
-      const previewConfig = {'fontScaleFactor': fontScaleFactor};
-      shaka.ui.Utils.addHoverAndFocusListeners(
-          this.eventManager, button,
-          () => this.controls.updateTextStylePreview(previewConfig),
-          () => this.controls.resetTextStylePreview());
-
-      this.menu.appendChild(button);
-    }
-    this.updateTextSizeSelection_();
-    shaka.ui.Utils.focusOnTheChosenItem(this.menu);
+    this.updateLocalizedStrings();
+    this.checkAvailability();
+    this.rebuildMenu();
   }
 
   /** @override */
-  onMenuOpen() {
-    this.controls.showTextStylePreview();
+  getItems() {
+    return this.controls.getConfig().captionsFontScaleFactors;
   }
 
   /** @override */
-  onMenuClose() {
-    this.controls.hideTextStylePreview();
+  getLabelForItem(fontScaleFactor) {
+    return fontScaleFactor * 100 + '%';
   }
 
-  /** @private */
-  updateTextSizeSelection_() {
-    // Remove the old checkmark icon and related tags and classes if it exists.
-    const checkmarkIcon = shaka.ui.Utils.getDescendantIfExists(
-        this.menu, 'shaka-ui-icon shaka-chosen-item');
-    if (checkmarkIcon) {
-      const previouslySelectedButton = checkmarkIcon.parentElement;
-      previouslySelectedButton.setAttribute('aria-checked', 'false');
-      const previouslySelectedSpan =
-          previouslySelectedButton.getElementsByTagName('span')[0];
-      if (previouslySelectedSpan) {
-        previouslySelectedSpan.classList.remove('shaka-chosen-item');
-      }
-      previouslySelectedButton.removeChild(checkmarkIcon);
-    }
+  /** @override */
+  onItemSelected(fontScaleFactor) {
+    this.player.configure('textDisplayer.fontScaleFactor', fontScaleFactor);
+  }
+
+  /** @override */
+  getPreviewConfigForItem(fontScaleFactor) {
+    return {fontScaleFactor: fontScaleFactor};
+  }
+
+  /** @override */
+  getCurrentValueLabel() {
     const fontScaleFactor =
         this.player.getConfiguration().textDisplayer.fontScaleFactor;
-    const fontScaleFactorName = fontScaleFactor * 100 + '%'; ;
-    // Add the checkmark icon, related tags and classes to the newly selected
-    // button.
-    const span = Array.from(this.menu.querySelectorAll('span')).find((el) => {
-      return el.textContent === fontScaleFactorName;
-    });
-    if (span) {
-      const button = span.parentElement;
-      button.appendChild(shaka.ui.Utils.checkmarkIcon());
-      button.setAttribute('aria-checked', 'true');
-      span.classList.add('shaka-chosen-item');
-    }
-    this.currentSelection.textContent = fontScaleFactorName;
+    return fontScaleFactor * 100 + '%';
+  }
+
+  /** @override */
+  updateLocalizedStrings() {
+    const LocIds = shaka.ui.Locales.Ids;
+
+    this.backButton.ariaLabel = this.localization.resolve(LocIds.BACK);
+
+    const label = this.localization.resolve(LocIds.SUBTITLE_SIZE);
+    this.button.ariaLabel = label;
+    this.nameSpan.textContent = label;
+    this.backSpan.textContent = label;
   }
 };
 

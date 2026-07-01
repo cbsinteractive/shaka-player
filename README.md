@@ -205,7 +205,7 @@ For details on the HLS format and these tags' meanings, see https://datatracker.
 
 Features supported:
  - Media over QUIC Transport [draft-14](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/14/) and [draft-16](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/16/)
- - MSF [draft-0](https://datatracker.ietf.org/doc/draft-ietf-moq-msf/00/) and CMSF [draft-0](https://datatracker.ietf.org/doc/draft-ietf-moq-cmsf/00/)
+ - MSF [draft-1](https://datatracker.ietf.org/doc/draft-ietf-moq-msf/01/) and CMSF [draft-1](https://datatracker.ietf.org/doc/draft-ietf-moq-cmsf/01/)
  - Audio, Video and Text
  - ABR
  - DRM support for Widevine, PlayReady, FairPlay and ClearKey, using the CMSF ContentProtection
@@ -417,7 +417,6 @@ Shaka currently provides the following versions:
 
  * [Demo](https://shaka-project.github.io/shaka-player-release/)([sources](demo/))
  * [Nightly Demo](https://shaka-project.github.io/shaka-player/)
- * [Demo index](https://index-dot-shaka-player-demo.appspot.com)
  * [API documentation](https://shaka-project.github.io/shaka-player/docs/api/index.html)
  * [Tutorials](https://shaka-project.github.io/shaka-player/docs/api/tutorial-welcome.html)
  * [Hosted builds on Google Hosted Libraries](https://developers.google.com/speed/libraries/#shaka-player)

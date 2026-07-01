@@ -143,23 +143,15 @@ shaka.ui.RangeElement = class extends shaka.ui.Element {
         }
       });
 
-      this.eventManager.listen(this.bar, 'touchend', (e) => {
-        if (this.isChanging_) {
-          this.isChanging_ = false;
-          this.setBarValueForTouch_(e);
-          this.onChangeEnd();
-          e.stopPropagation();
-        }
-      });
-
-      this.eventManager.listen(this.bar, 'touchcancel', (e) => {
-        if (this.isChanging_) {
-          this.isChanging_ = false;
-          this.setBarValueForTouch_(e);
-          this.onChangeEnd();
-          e.stopPropagation();
-        }
-      });
+      this.eventManager.listenMulti(this.bar, ['touchend', 'touchcancel'],
+          (e) => {
+            if (this.isChanging_) {
+              this.isChanging_ = false;
+              this.setBarValueForTouch_(e);
+              this.onChangeEnd();
+              e.stopPropagation();
+            }
+          });
     }
 
     this.eventManager.listen(this.bar, 'mouseup', (e) => {
@@ -217,6 +209,30 @@ shaka.ui.RangeElement = class extends shaka.ui.Element {
    */
   setStep(step) {
     this.bar.step = step;
+  }
+
+  /**
+   * @override
+   * @export
+   */
+  getMin() {
+    return parseFloat(this.bar.min);
+  }
+
+  /**
+   * @override
+   * @export
+   */
+  getMax() {
+    return parseFloat(this.bar.max);
+  }
+
+  /**
+   * @override
+   * @export
+   */
+  setBackground(background) {
+    this.container.style.background = background;
   }
 
   /**

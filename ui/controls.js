@@ -625,8 +625,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
         'shaka-no-propagation');
     for (const element of noPropagationElements) {
       const cb = (event) => event.stopPropagation();
-      this.eventManager_.listen(element, 'click', cb);
-      this.eventManager_.listen(element, 'dblclick', cb);
+      this.eventManager_.listenMulti(element, ['click', 'dblclick'], cb);
       if (navigator.maxTouchPoints > 0) {
         const touchCb = (event) => {
           if (!this.isOpaque()) {
@@ -977,9 +976,8 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
 
   /**
    * @return {boolean}
-   * @private
    */
-  shouldUseDocumentPictureInPicture_() {
+  shouldUseDocumentPictureInPicture() {
     return 'documentPictureInPicture' in window &&
         this.config_.documentPictureInPicture.enabled;
   }
@@ -1025,7 +1023,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       if (this.shouldUseDocumentFullscreen_()) {
         if (this.isPiPEnabled()) {
           await this.togglePiP();
-          if (this.shouldUseDocumentPictureInPicture_()) {
+          if (this.shouldUseDocumentPictureInPicture()) {
             // This is necessary because we need a small delay when
             // executing actions when returning from document PiP.
             await shaka.util.Functional.delay(0.05);
@@ -1089,7 +1087,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       return false;
     }
     if (document.pictureInPictureEnabled ||
-        this.shouldUseDocumentPictureInPicture_()) {
+        this.shouldUseDocumentPictureInPicture()) {
       const video = /** @type {HTMLVideoElement} */(this.localVideo_);
       return !video.disablePictureInPicture;
     }
@@ -1109,7 +1107,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
   /** @export */
   async togglePiP() {
     try {
-      if (this.shouldUseDocumentPictureInPicture_()) {
+      if (this.shouldUseDocumentPictureInPicture()) {
         // If you were fullscreen, leave fullscreen first.
         if (this.isFullScreenEnabled()) {
           await this.exitFullScreen_();
@@ -1168,8 +1166,16 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     placeholder.classList.add('shaka-video-container');
     placeholder.classList.add('pip-placeholder');
     const video = /** @type {HTMLVideoElement} */ (this.video_);
-    if (video?.poster) {
-      const posterDiv = document.createElement('div');
+    let posterDiv = null;
+    const updatePoster = () => {
+      if (posterDiv) {
+        posterDiv.remove();
+        posterDiv = null;
+      }
+      if (!video?.poster) {
+        return;
+      }
+      posterDiv = document.createElement('div');
       posterDiv.classList.add('pip-poster');
       posterDiv.style.backgroundImage = `url("${video.poster}")`;
       const videoWidth = video.videoWidth || video.clientWidth;
@@ -1178,18 +1184,52 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       if (videoWidth && videoHeight) {
         posterDiv.style.setProperty('aspect-ratio',
             `${videoWidth} / ${videoHeight}`);
-        placeholder.appendChild(posterDiv);
       }
+      placeholder.prepend(posterDiv);
+    };
+
+    updatePoster();
+
+    const posterObserver = new MutationObserver(() => {
+      updatePoster();
+    });
+    if (video) {
+      posterObserver.observe(this.getLocalVideo(), {
+        attributes: true,
+        attributeFilter: ['poster'],
+      });
     }
+
+    // Blur overlay: covers the full placeholder, blurs the poster behind it.
+    const blurOverlay = shaka.util.Dom.createHTMLElement('div');
+    blurOverlay.classList.add('pip-blur-overlay');
+    placeholder.appendChild(blurOverlay);
+
+    // Wrap pulse ring + icon together so the ring is centered on the button.
+    const pipIconGroup = shaka.util.Dom.createHTMLElement('div');
+    pipIconGroup.classList.add('pip-icon-group');
+    placeholder.appendChild(pipIconGroup);
+
+    const pulseRing = shaka.util.Dom.createHTMLElement('div');
+    pulseRing.classList.add('pip-pulse-ring');
+    pipIconGroup.appendChild(pulseRing);
+
     const iconWrapper = shaka.util.Dom.createHTMLElement('div');
     iconWrapper.classList.add('pip-icon-wrapper');
-    placeholder.appendChild(iconWrapper);
+    pipIconGroup.appendChild(iconWrapper);
     const pipIcon = (new shaka.ui.Icon(iconWrapper,
         shaka.ui.Enums.MaterialDesignSVGIcons['EXIT_PIP'])).getSvgElement();
     const pipAction = () => this.togglePiP();
     this.eventManager_.listenOnce(pipIcon, 'click', pipAction);
 
+    const pipLabel = shaka.util.Dom.createHTMLElement('p');
+    pipLabel.classList.add('pip-label');
+    pipLabel.textContent =
+        this.localization_.resolve(shaka.ui.Locales.Ids.PIP_WINDOW_ACTIVE);
+    placeholder.appendChild(pipLabel);
+
     const style = getComputedStyle(pipPlayer);
+    placeholder.style.width = style.width;
     placeholder.style.height = style.height;
     parentPlayer.appendChild(placeholder);
 
@@ -1206,6 +1246,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
 
     // Listen for the PiP closing event to move the player back.
     this.eventManager_.listenOnce(pipWindow, 'pagehide', () => {
+      posterObserver.disconnect();
       this.eventManager_.unlisten(pipIcon, 'click', pipAction);
       pipPlayer.classList.remove('pip-mode');
       placeholder.replaceWith(/** @type {!Node} */(pipPlayer));
@@ -1679,11 +1720,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     // Listen for click events to dismiss the settings menus.
     this.eventManager_.listen(window, 'click', () => this.hideSettingsMenus());
 
-    this.eventManager_.listen(this.video_, 'play', () => {
-      this.onPlayStateChange_();
-    });
-
-    this.eventManager_.listen(this.video_, 'pause', () => {
+    this.eventManager_.listenMulti(this.video_, ['play', 'pause'], () => {
       this.onPlayStateChange_();
     });
 
@@ -1692,13 +1729,10 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     });
 
     if (navigator.maxTouchPoints > 0) {
-      this.eventManager_.listen(this.videoContainer_, 'touchmove', (e) => {
-        this.onMouseMove_(e);
-      }, {passive: true});
-
-      this.eventManager_.listen(this.videoContainer_, 'touchend', (e) => {
-        this.onMouseMove_(e);
-      }, {passive: true});
+      this.eventManager_.listenMulti(
+          this.videoContainer_, ['touchmove', 'touchend'], (e) => {
+            this.onMouseMove_(e);
+          }, {passive: true});
     }
 
     this.eventManager_.listen(this.videoContainer_, 'mouseleave', () => {
@@ -1717,33 +1751,12 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       this.dispatchEvent(new shaka.util.FakeEvent('vrstatuschanged'));
     });
 
-    this.eventManager_.listen(this.videoContainer_, 'keydown', (e) => {
-      if (!this.config_.enableKeyboardPlaybackControlsInWindow &&
-        !this.isFullScreenEnabled()) {
-        this.onControlsKeyDown_(/** @type {!KeyboardEvent} */(e));
-      }
-    });
-
-    this.eventManager_.listen(this.videoContainer_, 'keyup', (e) => {
-      if (!this.config_.enableKeyboardPlaybackControlsInWindow &&
-        !this.isFullScreenEnabled()) {
-        this.onControlsKeyUp_(/** @type {!KeyboardEvent} */(e));
-      }
-    });
-
-    this.eventManager_.listen(window, 'keydown', (e) => {
-      if (this.config_.enableKeyboardPlaybackControlsInWindow ||
-        this.isFullScreenEnabled()) {
-        this.onControlsKeyDown_(/** @type {!KeyboardEvent} */(e));
-      }
-    });
-
-    this.eventManager_.listen(window, 'keyup', (e) => {
-      if (this.config_.enableKeyboardPlaybackControlsInWindow ||
-        this.isFullScreenEnabled()) {
-        this.onControlsKeyUp_(/** @type {!KeyboardEvent} */(e));
-      }
-    });
+    this.listenForControlsKeyEvents_(this.videoContainer_,
+        () => !this.config_.enableKeyboardPlaybackControlsInWindow &&
+              !this.isFullScreenEnabled());
+    this.listenForControlsKeyEvents_(window,
+        () => this.config_.enableKeyboardPlaybackControlsInWindow ||
+              this.isFullScreenEnabled());
 
     this.eventManager_.listen(
         this.adManager_, shaka.ads.Utils.AD_STARTED, () => {
@@ -2074,6 +2087,24 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
   /** @private */
   onPlayStateChange_() {
     this.computeOpacity();
+  }
+
+  /**
+   * @param {!EventTarget} target
+   * @param {function():boolean} condition
+   * @private
+   */
+  listenForControlsKeyEvents_(target, condition) {
+    this.eventManager_.listen(target, 'keydown', (e) => {
+      if (condition()) {
+        this.onControlsKeyDown_(/** @type {!KeyboardEvent} */(e));
+      }
+    });
+    this.eventManager_.listen(target, 'keyup', (e) => {
+      if (condition()) {
+        this.onControlsKeyUp_(/** @type {!KeyboardEvent} */(e));
+      }
+    });
   }
 
   /**

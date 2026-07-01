@@ -11,7 +11,6 @@ goog.require('shaka.ads.Utils');
 goog.require('shaka.net.NetworkingEngine');
 goog.require('shaka.net.NetworkingUtils');
 goog.require('shaka.ui.Locales');
-goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.RangeElement');
 goog.require('shaka.ui.Utils');
 goog.require('shaka.util.Dom');
@@ -179,15 +178,6 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       this.controls.hideSettingsMenus();
     });
 
-    this.eventManager.listenMulti(
-        this.localization,
-        [
-          shaka.ui.Localization.LOCALE_UPDATED,
-          shaka.ui.Localization.LOCALE_CHANGED,
-        ], () => {
-          this.updateAriaLabel_();
-        });
-
     this.eventManager.listen(
         this.adManager, shaka.ads.Utils.AD_STARTED, () => {
           if (!this.shouldBeDisplayed_()) {
@@ -254,7 +244,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     // Initialize seek state and label.
     this.setValue(this.video.currentTime);
     this.update();
-    this.updateAriaLabel_();
+    this.updateLocalizedStrings();
 
     if (this.ad) {
       // There was already an ad.
@@ -567,8 +557,9 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   }
 
   /**
-   * @param {!Array<{ position: string, width: string }>} rects
+   * @param {!Array<{position: string, width: string}>} rects
    * @param {string} color
+   * @return {string}
    * @private
    */
   buildLayeredBackground_(rects, color) {
@@ -576,8 +567,26 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       return 'transparent';
     }
     return rects
-        .map(({position, width}) =>
-          `linear-gradient(${color}) ${position} / ${width} 100% no-repeat`)
+        .map(({position, width}) => {
+          if (width.endsWith('%')) {
+            // CSS background-position with percentages behaves
+            // differently than absolute pixels. To avoid shifting
+            // percentage-based markers, we use color stops.
+            const start = parseFloat(position);
+            const end = start + parseFloat(width);
+            const p1 = `transparent ${start}%`;
+            const p2 = `${color} ${start}%`;
+            const p3 = `${color} ${end}%`;
+            const p4 = `transparent ${end}%`;
+
+            return `linear-gradient(to right, ${p1}, ${p2}, ${p3}, ` +
+                   `${p4}) 0 0 / 100% 100% no-repeat`;
+          }
+
+          // Standard background positioning for absolute widths.
+          return `linear-gradient(${color}, ${color}) ` +
+                 `${position} / ${width} 100% no-repeat`;
+        })
         .join(',');
   }
 
@@ -627,8 +636,8 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     return this.ad == null || !this.ad.isLinear();
   }
 
-  /** @private */
-  updateAriaLabel_() {
+  /** @override */
+  updateLocalizedStrings() {
     this.bar.ariaLabel = this.localization.resolve(shaka.ui.Locales.Ids.SEEK);
   }
 

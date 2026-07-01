@@ -1,6 +1,6 @@
 /*! @license
  * Shaka Player
- * Copyright 2026 Google LLC
+ * Copyright 2016 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -114,6 +114,48 @@ describe('JsonUtils', () => {
       expect(periods.length).toBe(2);
       expect(periods[0].attributes['id']).toBe('p1');
       expect(periods[1].attributes['id']).toBe('p2');
+    });
+
+    it('XML-escapes text content to prevent XML injection', () => {
+      // A malicious JSON value containing XML metacharacters must not be
+      // interpreted as markup by the XML parser.
+      const json = {
+        BaseURL: [{
+          $value: '</BaseURL><BaseURL>http://attacker.com/segments/',
+        }],
+      };
+
+      const xml = parse(shaka.dash.JsonUtils.jsonToMpd(json));
+
+      // Must have exactly one BaseURL element — not two.
+      const baseUrls = shaka.util.TXml.findChildren(xml, 'BaseURL');
+      expect(baseUrls.length).toBe(1);
+
+      // The text content must be the literal string, not parsed as markup.
+      expect(shaka.util.TXml.getContents(baseUrls[0]))
+          .toBe('</BaseURL><BaseURL>http://attacker.com/segments/');
+    });
+
+    it('XML-escapes attribute values to prevent injection', () => {
+      const json = {
+        Period: [{
+          id: 'p1" injected="yes',
+        }],
+      };
+
+      const mpd = shaka.dash.JsonUtils.jsonToMpd(json);
+
+      // The double quote must be escaped so it cannot terminate the
+      // attribute value and inject a new attribute.
+      expect(mpd).toContain('id="p1&quot; injected=&quot;yes"');
+      expect(mpd).not.toContain('injected="yes"');
+
+      const xml = parse(mpd);
+      const period = shaka.util.TXml.findChild(xml, 'Period');
+      expect(period).not.toBeNull();
+
+      // No spurious 'injected' attribute must exist after parsing.
+      expect(period.attributes['injected']).toBeUndefined();
     });
 
     it('writes namespaced child elements (prefix:Element)', () => {
