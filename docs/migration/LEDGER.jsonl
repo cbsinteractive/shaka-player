@@ -1,4 +1,4 @@
-{"id":"rails:a","type":"rails-header","paths":["docs/migration/rails/a.txt"],"deps":[],"status":"pending","attempts":0,"batch":null,"commit":null,"note":null}
+{"id":"rails:a","type":"rails-header","paths":["docs/migration/rails/a.txt"],"deps":[],"status":"done","attempts":0,"batch":null,"commit":null,"note":null}
 {"id":"rails:c","type":"rails-header","paths":["docs/migration/rails/c.txt"],"deps":["rails:b"],"status":"pending","attempts":0,"batch":null,"commit":null,"note":null}
 {"id":"rails:b","type":"rails-header","paths":["docs/migration/rails/b.txt"],"deps":[],"status":"pending","attempts":0,"batch":null,"commit":null,"note":null}
 {"id":"rails:probe","type":"rails-header","paths":["lib/__rails_probe.js"],"deps":[],"status":"pending","attempts":0,"batch":null,"commit":null,"note":null}
