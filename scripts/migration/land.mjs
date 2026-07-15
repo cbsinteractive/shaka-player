@@ -14,6 +14,10 @@ export function compare(baseline, current, manifest) {
   const failures = [];
   const notes = [];
   for (const r of manifest) {
+    if (!['up', 'down', 'eq'].includes(r.direction)) {
+      failures.push(`${r.id}: unknown direction ${r.direction}`);
+      continue;
+    }
     const cur = current[r.id];
     if (!(r.id in baseline)) {
       notes.push(`new ratchet ${r.id} = ${cur}`);
