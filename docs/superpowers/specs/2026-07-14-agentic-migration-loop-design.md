@@ -110,9 +110,10 @@ conflicts under parallelism.
 **Invariants** (enforced by `ledger.mjs check` and the land script):
 
 1. A code change always carries its unit's ledger flip in the same commit.
-   Ledger-only commits are permitted for exactly two cases: status-only transitions
-   (quarantine, unblock) and the batch skill's metadata backfill (`commit`, `batch`
-   fields).
+   Ledger-only commits are permitted for exactly three cases: status-only transitions
+   (quarantine, unblock), queue seeding (adding new `pending` units), and the batch
+   skill's metadata backfill (`commit`, `batch` fields). Ledger-only commits use the
+   `migrate-meta:` message prefix so they never match the `migrate(<type>):` convention.
 2. Every `done` unit resolves to exactly one commit by message convention, and every
    `migrate:` commit resolves to a `done` unit (checked in both directions).
 3. Only truth is committed; views are derived. No committed status dashboards.

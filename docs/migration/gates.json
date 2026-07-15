@@ -1,0 +1,3 @@
+{
+  "rails-header": {"fast": ["node scripts/migration/rails-gate.mjs --check {paths}"]}
+}

@@ -1,0 +1,4 @@
+[
+  {"id": "rails-headers", "direction": "up",
+   "command": "node scripts/migration/rails-gate.mjs --count docs/migration/rails lib/__rails_probe.js"}
+]
