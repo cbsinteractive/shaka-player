@@ -13,7 +13,8 @@ export function parseLedger(text) {
     } catch {
       throw new Error(`LEDGER line ${i + 1}: invalid JSON`);
     }
-    if (!unit.id || !unit.type || !Array.isArray(unit.paths) ||
+    if (typeof unit !== 'object' || unit === null || Array.isArray(unit) ||
+        !unit.id || !unit.type || !Array.isArray(unit.paths) ||
         !Array.isArray(unit.deps) || !STATUSES.has(unit.status)) {
       throw new Error(`LEDGER line ${i + 1}: missing or invalid fields`);
     }

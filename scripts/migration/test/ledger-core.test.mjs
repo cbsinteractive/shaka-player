@@ -18,6 +18,7 @@ test('parseLedger rejects duplicate ids, bad JSON, bad status', () => {
   assert.throws(() => parseLedger(U('a') + '\n' + U('a') + '\n'), /duplicate id/);
   assert.throws(() => parseLedger('{oops\n'), /line 1: invalid JSON/);
   assert.throws(() => parseLedger(U('a', {status: 'wat'}) + '\n'), /invalid fields/);
+  assert.throws(() => parseLedger('null\n'), /invalid fields/);
 });
 
 test('pickNext returns first pending whose deps are all done, in file order', () => {
