@@ -96,3 +96,32 @@ test('land --batch refuses when not on migration/main', () => {
     assert.match(`${e.stdout}${e.stderr}`, /must run on migration\/main/);
   }
 });
+
+test('compare handles decimals numerically and rejects non-numeric up/down', () => {
+  const manifest = [
+    {id: 'p', direction: 'up', command: 'x'},
+    {id: 'q', direction: 'down', command: 'x'},
+  ];
+  const r1 = compare({p: 9.5, q: 2}, {p: 10.2, q: 2}, manifest);
+  assert.deepEqual(r1.failures, []);
+  const r2 = compare({p: '9.5%', q: 2}, {p: '10.2%', q: 2}, manifest);
+  assert.ok(r2.failures.some((f) => f.includes('non-numeric value for direction up')));
+});
+
+test('land --batch aborts the merge when a ratchet command itself fails', () => {
+  const repo = landRepo();
+  const before = repo.g('rev-parse HEAD');
+  repo.g('checkout -b migration/batch-000');
+  repo.g('rm count.txt');
+  repo.commitAll('migrate-meta: remove ratchet input');
+  repo.g('checkout migration/main');
+  try {
+    execSync(`node ${LAND} --batch migration/batch-000`, {cwd: repo.dir, stdio: 'pipe'});
+    assert.fail('expected failure');
+  } catch (e) {
+    assert.match(`${e.stdout}${e.stderr}`, /land failed mid-merge/);
+  }
+  assert.equal(repo.g('rev-parse HEAD'), before);
+  assert.equal(repo.g('status --porcelain'), '');
+  assert.throws(() => repo.g('rev-parse -q --verify MERGE_HEAD'));
+});

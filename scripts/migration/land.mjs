@@ -20,9 +20,15 @@ export function compare(baseline, current, manifest) {
       continue;
     }
     const base = baseline[r.id];
-    const ok = r.direction === 'up' ? cur >= base :
-        r.direction === 'down' ? cur <= base :
-        String(cur) === String(base);
+    let ok;
+    if (r.direction === 'eq') {
+      ok = String(cur) === String(base);
+    } else if (typeof cur !== 'number' || typeof base !== 'number') {
+      failures.push(`${r.id}: non-numeric value for direction ${r.direction} (${base} -> ${cur})`);
+      continue;
+    } else {
+      ok = r.direction === 'up' ? cur >= base : cur <= base;
+    }
     if (!ok) failures.push(`${r.id}: ${base} -> ${cur} violates ${r.direction}`);
   }
   for (const id of Object.keys(baseline)) {
@@ -59,25 +65,30 @@ function main() {
     die(`merge conflict merging ${branch}; aborted`);
   }
   const abort = (msg) => {
-    sh('git merge --abort', {cwd});
+    shOk('git merge --abort', {cwd});
     die(msg);
   };
-  if (!shOk(`node ${LEDGER_CLI} check --ref "HEAD MERGE_HEAD"`, {cwd})) {
-    abort('ledger check failed on merged tree; aborted');
-  }
-  const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
-  const manifest = JSON.parse(readFileSync(RATCHETS, 'utf8'));
-  const current = ratchets();
-  const {failures, notes} = compare(baseline, current, manifest);
-  for (const n of notes) console.log(`note: ${n}`);
-  if (failures.length) abort(failures.join('\n'));
+  try {
+    if (!shOk(`node ${LEDGER_CLI} check --ref "HEAD MERGE_HEAD"`, {cwd})) {
+      abort('ledger check failed on merged tree; aborted');
+    }
+    const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
+    const manifest = JSON.parse(readFileSync(RATCHETS, 'utf8'));
+    const current = ratchets();
+    const {failures, notes} = compare(baseline, current, manifest);
+    for (const n of notes) console.log(`note: ${n}`);
+    if (failures.length) abort(failures.join('\n'));
 
-  const n = sh(`git log --format=%s migration/main..${branch}`, {cwd})
-      .split('\n').filter((s) => /^migrate\(/.test(s)).length;
-  writeFileSync(BASELINE, JSON.stringify(current, null, 2) + '\n');
-  sh(`git add ${BASELINE}`, {cwd});
-  sh(`git commit -m "land: ${branch} (${n} units)"`, {cwd});
-  console.log(`LANDED ${branch} (${n} units)`);
+    const n = sh(`git log --format=%s migration/main..${branch}`, {cwd})
+        .split('\n').filter((s) => /^migrate\(/.test(s)).length;
+    writeFileSync(BASELINE, JSON.stringify(current, null, 2) + '\n');
+    sh(`git add ${BASELINE}`, {cwd});
+    sh(`git commit -m "land: ${branch} (${n} units)"`, {cwd});
+    console.log(`LANDED ${branch} (${n} units)`);
+  } catch (e) {
+    shOk('git merge --abort', {cwd});
+    die(`land failed mid-merge: ${e.message}; merge aborted`);
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();

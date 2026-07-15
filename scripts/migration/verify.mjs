@@ -33,7 +33,7 @@ if (mode === '--unit') {
   const values = {};
   for (const r of manifest) {
     const out = sh(r.command, {maxBuffer: 64 * 1024 * 1024});
-    values[r.id] = /^-?\d+$/.test(out) ? Number(out) : out;
+    values[r.id] = /^-?\d+(\.\d+)?$/.test(out) ? Number(out) : out;
   }
   console.log(JSON.stringify(values, null, 2));
 } else {
