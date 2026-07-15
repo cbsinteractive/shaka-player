@@ -12,6 +12,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: node --test scripts/migration/test/
+      - run: node --test scripts/migration/test/*.test.mjs
       - run: node scripts/migration/ledger.mjs check
-      - run: node scripts/migration/verify.mjs --ratchets
+      - run: node scripts/migration/land.mjs --compare

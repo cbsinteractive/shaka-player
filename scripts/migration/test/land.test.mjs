@@ -125,3 +125,16 @@ test('land --batch aborts the merge when a ratchet command itself fails', () => 
   assert.equal(repo.g('status --porcelain'), '');
   assert.throws(() => repo.g('rev-parse -q --verify MERGE_HEAD'));
 });
+
+test('land --compare gates read-only against the committed baseline', () => {
+  const repo = landRepo();
+  const ok = execSync(`node ${LAND} --compare`, {cwd: repo.dir, encoding: 'utf8'});
+  assert.match(ok, /RATCHETS OK vs baseline/);
+  repo.write('count.txt', '0');
+  try {
+    execSync(`node ${LAND} --compare`, {cwd: repo.dir, stdio: 'pipe'});
+    assert.fail('expected failure');
+  } catch (e) {
+    assert.match(`${e.stdout}${e.stderr}`, /count: 1 -> 0 violates up/);
+  }
+});

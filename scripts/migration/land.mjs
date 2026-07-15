@@ -46,9 +46,23 @@ function main() {
     console.error(msg);
     process.exit(1);
   };
+  const ratchets = () => JSON.parse(sh(`node ${VERIFY} --ratchets`, {cwd, maxBuffer: 64 * 1024 * 1024}));
+
+  if (mode === '--compare') {
+    if (!existsSync(BASELINE)) die('no baseline; run land.mjs --init first');
+    const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
+    const manifest = JSON.parse(readFileSync(RATCHETS, 'utf8'));
+    const current = ratchets();
+    const {failures, notes} = compare(baseline, current, manifest);
+    for (const n of notes) console.log(`note: ${n}`);
+    console.log(JSON.stringify(current, null, 2));
+    if (failures.length) die(failures.join('\n'));
+    console.log('RATCHETS OK vs baseline');
+    return;
+  }
+
   if (currentBranch(cwd) !== 'migration/main') die('must run on migration/main');
   if (!isClean(cwd)) die('working tree must be clean');
-  const ratchets = () => JSON.parse(sh(`node ${VERIFY} --ratchets`, {cwd, maxBuffer: 64 * 1024 * 1024}));
 
   if (mode === '--init') {
     writeFileSync(BASELINE, JSON.stringify(ratchets(), null, 2) + '\n');
@@ -57,7 +71,7 @@ function main() {
     console.log('baseline initialized');
     return;
   }
-  if (mode !== '--batch' || !branch) die('usage: land.mjs --init | --batch <branch>');
+  if (mode !== '--batch' || !branch) die('usage: land.mjs --init | --batch <branch> | --compare');
   if (!existsSync(BASELINE)) die('no baseline; run land.mjs --init first');
 
   if (!shOk(`git merge --no-ff --no-commit ${branch}`, {cwd})) {
