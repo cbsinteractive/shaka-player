@@ -13,8 +13,8 @@ description: Assemble the current migration/batch-NNN branch into a reviewed, ra
    - `node scripts/migration/ledger.mjs stats`
    - `git log --format='%h %s' migration/main..HEAD`
    - `git diff --stat migration/main..HEAD`
-   - `node scripts/migration/verify.mjs --ratchets` next to the values in
-     `docs/migration/RATCHET_BASELINE.json`
+   - `node scripts/migration/land.mjs --compare` (the exact land-time ratchet verdict;
+     works from the batch branch)
    - Quarantines from this batch with notes; any unit with `attempts` > 0 flagged "read first".
 4. **PR (when pushing).** `git push origin migration/batch-NNN` then
    `gh pr create --base migration/main --head migration/batch-NNN --title "migration: batch-NNN (<n> units)"`

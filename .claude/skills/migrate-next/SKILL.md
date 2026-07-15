@@ -36,7 +36,8 @@ You execute ONE unit of migration work, then stop. Never more than one.
      playbook sections you used, the full diff, and the instruction "Assume this code is wrong.
      Find the bug. Reply NONE only if you cannot." Findings return you to step 3. NONE: continue.
 6. **Commit.** The unit's paths and its ledger flip go in ONE commit:
-   - `node scripts/migration/ledger.mjs update <id> --status done`
+   - `node scripts/migration/ledger.mjs update <id> --status done` (add `--attempts <n>`
+     when you needed n > 0 fix attempts; reviewers read those units first)
    - `git add <each path> docs/migration/LEDGER.jsonl`
    - `git commit -m "migrate(<type>): <id>"`
 7. **Report and stop.** Print: unit id, gates run, review outcome, and batch progress

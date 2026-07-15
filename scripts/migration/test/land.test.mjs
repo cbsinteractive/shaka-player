@@ -27,6 +27,11 @@ test('compare honors directions, new ratchets, dropped ratchets', () => {
   assert.ok(notes.some((s) => s.includes('ratchet dropped: dropped')));
 });
 
+test('compare rejects unknown directions', () => {
+  const {failures} = compare({x: 1}, {x: 2}, [{id: 'x', direction: 'Up', command: 'c'}]);
+  assert.deepEqual(failures, ['x: unknown direction Up']);
+});
+
 // Fixture: a repo whose single ratchet reads a number from count.txt.
 function landRepo() {
   const repo = makeRepo();

@@ -107,7 +107,9 @@ conflicts under parallelism.
 - `commit`: backfilled by the batch skill (a commit cannot contain its own sha). The
   durable unit-to-commit link is the message convention `migrate(<type>): <unit-id>`.
 
-**Invariants** (enforced by `ledger.mjs check` and the land script):
+**Invariants** (invariant 2 is machine-enforced by `ledger.mjs check` and the land
+script; invariants 1 and 4 are convention, human-reviewed, until land-time path
+validation is added; invariant 3 holds by construction):
 
 1. A code change always carries its unit's ledger flip in the same commit.
    Ledger-only commits are permitted for exactly three cases: status-only transitions
