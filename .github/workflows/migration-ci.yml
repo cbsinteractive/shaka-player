@@ -1,0 +1,17 @@
+name: migration-ci
+on:
+  pull_request:
+    branches: ['migration/main']
+jobs:
+  machinery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test scripts/migration/test/
+      - run: node scripts/migration/ledger.mjs check
+      - run: node scripts/migration/verify.mjs --ratchets
