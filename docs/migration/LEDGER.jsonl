@@ -1,5 +1,0 @@
-{"id":"rails:a","type":"rails-header","paths":["docs/migration/rails/a.txt"],"deps":[],"status":"done","attempts":0,"batch":null,"commit":"89342ffc39d88b75e0d3b163b70825b30d3fabf8","note":null}
-{"id":"rails:c","type":"rails-header","paths":["docs/migration/rails/c.txt"],"deps":["rails:b"],"status":"done","attempts":0,"batch":null,"commit":"73d7675d2b5d35e7425d64a18d5bb6cf45b8a71a","note":null}
-{"id":"rails:b","type":"rails-header","paths":["docs/migration/rails/b.txt"],"deps":[],"status":"done","attempts":0,"batch":null,"commit":"d1d2b2facc2ddf477397d6c0af3b0989d8287cae","note":null}
-{"id":"rails:probe","type":"rails-header","paths":["lib/__rails_probe.js"],"deps":[],"status":"done","attempts":0,"batch":null,"commit":"30310c57b1d50527af38d84d09dbdf50bc018a2e","note":null}
-{"id":"rails:poison","type":"rails-header","paths":["docs/migration/rails/poison.txt"],"deps":[],"status":"quarantined","attempts":2,"batch":null,"commit":null,"note":"gate: header missing after 2 attempts"}
