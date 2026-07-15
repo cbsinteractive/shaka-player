@@ -3,6 +3,7 @@
 import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {execSync} from 'node:child_process';
 import {sh, shOk} from './lib/sh.mjs';
 
 const DENY = ['.claude', 'docs/migration', 'docs/superpowers', 'scripts/migration',
@@ -17,8 +18,19 @@ const from = flag('from', 'migration/main');
 const onto = flag('onto', 'upstream/main');
 const out = flag('out', null);
 const message = flag('message', `export: product diff ${onto}..${from}`);
+const FLAG_NAMES = new Set(['--from', '--onto', '--out', '--message', '--paths']);
 const pathsIdx = args.indexOf('--paths');
-const paths = pathsIdx === -1 ? ['.'] : args.slice(pathsIdx + 1).filter((a) => !a.startsWith('--'));
+let paths = ['.'];
+if (pathsIdx !== -1) {
+  paths = [];
+  for (let i = pathsIdx + 1; i < args.length && !FLAG_NAMES.has(args[i]); i++) {
+    paths.push(args[i]);
+  }
+  if (paths.length === 0) {
+    console.error('--paths requires at least one path');
+    process.exit(1);
+  }
+}
 
 if (!out) {
   console.error('usage: export.mjs --onto <ref> --out <branch> [--from <ref>] [--paths <p...>] [--message <msg>]');
@@ -33,8 +45,9 @@ const cwd = process.cwd();
 const big = {maxBuffer: 256 * 1024 * 1024};
 const excludes = DENY.map((p) => `':(exclude)${p}'`).join(' ');
 const pathspec = paths.map((p) => `'${p}'`).join(' ');
-const diff = sh(`git diff --binary ${onto} ${from} -- ${pathspec} ${excludes}`, {cwd, ...big});
-if (diff === '') {
+const diff = execSync(`git diff --binary ${onto} ${from} -- ${pathspec} ${excludes}`,
+    {cwd, ...big});
+if (diff.length === 0) {
   console.log('EMPTY EXPORT');
   process.exit(0);
 }
@@ -43,7 +56,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'migration-export-'));
 try {
   sh(`git worktree add --detach ${tmp} ${onto}`, {cwd});
   const patch = join(tmp, '.export.patch');
-  writeFileSync(patch, diff + '\n');
+  writeFileSync(patch, diff);
   sh(`git apply --index --whitespace=nowarn ${patch}`, {cwd: tmp, ...big});
   rmSync(patch);
   sh(`git checkout -b ${out}`, {cwd: tmp});
